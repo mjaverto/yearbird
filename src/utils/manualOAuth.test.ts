@@ -8,8 +8,32 @@ import {
 } from './manualOAuth'
 
 describe('manualOAuth', () => {
+  // Mock sessionStorage for state parameter tests
+  const mockSessionStorage: Record<string, string> = {}
+
+  beforeEach(() => {
+    // Clear mock storage
+    for (const key of Object.keys(mockSessionStorage)) {
+      delete mockSessionStorage[key]
+    }
+
+    vi.stubGlobal('sessionStorage', {
+      getItem: vi.fn((key: string) => mockSessionStorage[key] ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        mockSessionStorage[key] = value
+      }),
+      removeItem: vi.fn((key: string) => {
+        delete mockSessionStorage[key]
+      }),
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   describe('buildOAuthRedirectUrl', () => {
-    it('builds correct OAuth URL with all parameters', () => {
+    it('builds correct OAuth URL with all parameters including state', () => {
       const url = buildOAuthRedirectUrl(
         'test-client-id',
         'https://example.com/callback',
@@ -25,6 +49,29 @@ describe('manualOAuth', () => {
       expect(parsed.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.readonly')
       expect(parsed.searchParams.get('include_granted_scopes')).toBe('true')
       expect(parsed.searchParams.get('prompt')).toBe('select_account')
+      // State parameter should be present for CSRF protection
+      expect(parsed.searchParams.get('state')).toBeTruthy()
+    })
+
+    it('stores state parameter in sessionStorage', () => {
+      const url = buildOAuthRedirectUrl(
+        'test-client-id',
+        'https://example.com/callback',
+        'scope',
+      )
+
+      const parsed = new URL(url)
+      const state = parsed.searchParams.get('state')
+      expect(mockSessionStorage['yearbird:oauthState']).toBe(state)
+    })
+
+    it('generates unique state for each call', () => {
+      const url1 = buildOAuthRedirectUrl('id', 'uri', 'scope')
+      const url2 = buildOAuthRedirectUrl('id', 'uri', 'scope')
+
+      const state1 = new URL(url1).searchParams.get('state')
+      const state2 = new URL(url2).searchParams.get('state')
+      expect(state1).not.toBe(state2)
     })
 
     it('encodes special characters in parameters', () => {
@@ -108,6 +155,47 @@ describe('manualOAuth', () => {
     it('returns null when window is undefined', () => {
       globalThis.window = undefined as unknown as Window & typeof globalThis
       expect(extractTokenFromHash()).toBeNull()
+    })
+
+    it('accepts token when state matches stored state', () => {
+      mockSessionStorage['yearbird:oauthState'] = 'test-state-123'
+      window.location.hash = '#access_token=test-token&expires_in=3600&state=test-state-123'
+      const result = extractTokenFromHash()
+      expect(result).toEqual({
+        accessToken: 'test-token',
+        expiresIn: 3600,
+      })
+      // State should be consumed (removed from storage)
+      expect(mockSessionStorage['yearbird:oauthState']).toBeUndefined()
+    })
+
+    it('rejects token when state does not match', () => {
+      mockSessionStorage['yearbird:oauthState'] = 'expected-state'
+      window.location.hash = '#access_token=test-token&expires_in=3600&state=wrong-state'
+      const result = extractTokenFromHash()
+      expect(result).toBeNull()
+    })
+
+    it('accepts token when no state in hash but stored state exists (legacy flow)', () => {
+      mockSessionStorage['yearbird:oauthState'] = 'stored-state'
+      window.location.hash = '#access_token=test-token&expires_in=3600'
+      const result = extractTokenFromHash()
+      // Token accepted - state validation only fails on mismatch, not missing
+      expect(result).toEqual({
+        accessToken: 'test-token',
+        expiresIn: 3600,
+      })
+    })
+
+    it('accepts token when state in hash but no stored state (cross-tab scenario)', () => {
+      // No stored state (cleared or different tab)
+      window.location.hash = '#access_token=test-token&expires_in=3600&state=some-state'
+      const result = extractTokenFromHash()
+      // Token accepted - we can't validate without stored state
+      expect(result).toEqual({
+        accessToken: 'test-token',
+        expiresIn: 3600,
+      })
     })
   })
 

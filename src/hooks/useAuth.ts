@@ -130,6 +130,9 @@ export function useAuth() {
   // TV Mode: Use redirect-based OAuth when GIS library fails to load
   const [useTvMode, setUseTvMode] = useState(() => getTvModePreference())
 
+  // Track if GIS is unavailable (typed flag instead of string matching)
+  const [isGisUnavailable, setIsGisUnavailable] = useState(false)
+
   useEffect(() => {
     if (fixtureMode) {
       return
@@ -191,6 +194,7 @@ export function useAuth() {
           if (intervalId) {
             window.clearInterval(intervalId)
           }
+          setIsGisUnavailable(true)
           setAuthNotice('Google sign-in unavailable. Refresh to try again.')
           // Auto-enable TV mode on TV browsers when GIS fails
           if (isTVBrowser()) {
@@ -259,6 +263,7 @@ export function useAuth() {
     const status = signIn()
     if (status === 'unavailable') {
       setIsSigningIn(false)
+      setIsGisUnavailable(true)
       setAuthNotice('Google sign-in unavailable. Refresh to try again.')
       return
     }
@@ -305,12 +310,12 @@ export function useAuth() {
       setTvModePreference(enabled)
 
       // If enabling TV mode and GIS was unavailable, clear the notice
-      if (enabled && authNotice?.includes('unavailable')) {
+      if (enabled && isGisUnavailable) {
         setAuthNotice(null)
         setIsReady(true)
       }
     },
-    [authNotice, fixtureMode],
+    [isGisUnavailable, fixtureMode],
   )
 
   return {
@@ -322,6 +327,7 @@ export function useAuth() {
     signOut: handleSignOut,
     // TV Mode
     useTvMode,
+    isGisUnavailable,
     tvSignIn: handleTvSignIn,
     toggleTvMode: handleToggleTvMode,
   }

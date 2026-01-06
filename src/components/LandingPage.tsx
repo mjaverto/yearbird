@@ -7,6 +7,7 @@ interface LandingPageProps {
   isSigningIn?: boolean
   // TV Mode props
   useTvMode?: boolean
+  isGisUnavailable?: boolean
   onTvSignIn?: () => void
   onToggleTvMode?: (enabled: boolean) => void
 }
@@ -558,6 +559,7 @@ export function LandingPage({
   isReady = true,
   isSigningIn = false,
   useTvMode = false,
+  isGisUnavailable = false,
   onTvSignIn,
   onToggleTvMode,
 }: LandingPageProps) {
@@ -566,7 +568,7 @@ export function LandingPage({
 
   // Determine if we should show TV mode UI
   // Show when: explicitly in TV mode, or when GIS is unavailable
-  const showTvMode = useTvMode || authNotice?.includes('unavailable')
+  const showTvMode = useTvMode || isGisUnavailable
 
   // Handler for sign-in that routes to the appropriate flow
   const handleSignIn = useCallback(() => {
@@ -631,8 +633,8 @@ export function LandingPage({
             </p>
 
             <div className="mt-10 flex flex-col items-center gap-5">
-              {/* Show auth notice, but not "unavailable" when TV mode is active */}
-              {authNotice && !(showTvMode && authNotice.includes('unavailable')) ? (
+              {/* Show auth notice, but not GIS unavailable message when TV mode is active */}
+              {authNotice && !(showTvMode && isGisUnavailable) ? (
                 <div
                   role="alert"
                   className="w-full max-w-xl rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"

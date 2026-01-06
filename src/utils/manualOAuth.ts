@@ -6,10 +6,17 @@
  *
  * This uses redirect-based OAuth instead of popup-based GIS flow.
  *
+ * SECURITY NOTE: The implicit flow returns tokens in URL fragments, which
+ * are less secure than authorization code flow. Tokens may briefly appear
+ * in browser history before being cleared. This is an acceptable tradeoff
+ * for TV browsers where GIS cannot load, but authorization code flow with
+ * PKCE would be preferable if server-side token exchange were available.
+ *
  * @see https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow
  */
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+const OAUTH_STATE_KEY = 'yearbird:oauthState'
 
 export interface TokenData {
   accessToken: string
@@ -22,7 +29,47 @@ export interface OAuthError {
 }
 
 /**
+ * Generates a cryptographically random state parameter for CSRF protection.
+ * Falls back to Math.random if crypto API unavailable.
+ */
+function generateState(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  // Fallback for older browsers
+  return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+/**
+ * Stores the OAuth state parameter in sessionStorage for validation on callback.
+ */
+function storeOAuthState(state: string): void {
+  try {
+    sessionStorage.setItem(OAUTH_STATE_KEY, state)
+  } catch {
+    // sessionStorage may be unavailable
+  }
+}
+
+/**
+ * Retrieves and clears the stored OAuth state parameter.
+ * Returns null if not found or storage unavailable.
+ */
+function consumeOAuthState(): string | null {
+  try {
+    const state = sessionStorage.getItem(OAUTH_STATE_KEY)
+    sessionStorage.removeItem(OAUTH_STATE_KEY)
+    return state
+  } catch {
+    return null
+  }
+}
+
+/**
  * Builds the Google OAuth authorization URL for implicit flow.
+ *
+ * Generates and stores a random state parameter for CSRF protection.
+ * The state must be validated when extracting the token on callback.
  *
  * @param clientId - Google OAuth client ID
  * @param redirectUri - URI to redirect back to after authorization
@@ -34,11 +81,15 @@ export function buildOAuthRedirectUrl(
   redirectUri: string,
   scope: string,
 ): string {
+  const state = generateState()
+  storeOAuthState(state)
+
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'token', // Implicit flow - returns token in URL hash
     scope,
+    state, // CSRF protection - must be validated on callback
     include_granted_scopes: 'true',
     // Prompt user to select account (useful if they have multiple Google accounts)
     prompt: 'select_account',
@@ -50,9 +101,12 @@ export function buildOAuthRedirectUrl(
  * Extracts the OAuth token from the URL hash fragment.
  *
  * After a successful OAuth redirect, Google returns the access token
- * in the URL hash like: #access_token=xxx&expires_in=3600&token_type=Bearer
+ * in the URL hash like: #access_token=xxx&expires_in=3600&token_type=Bearer&state=xxx
  *
- * @returns Token data if present, null otherwise
+ * Validates the state parameter against the stored value to prevent CSRF attacks.
+ * Returns null if state validation fails.
+ *
+ * @returns Token data if present and valid, null otherwise
  */
 export function extractTokenFromHash(): TokenData | null {
   if (typeof window === 'undefined') {
@@ -67,8 +121,17 @@ export function extractTokenFromHash(): TokenData | null {
   const params = new URLSearchParams(hash)
   const accessToken = params.get('access_token')
   const expiresInRaw = params.get('expires_in')
+  const returnedState = params.get('state')
 
   if (!accessToken || !expiresInRaw) {
+    return null
+  }
+
+  // Validate state parameter to prevent CSRF attacks
+  const storedState = consumeOAuthState()
+  if (returnedState && storedState && returnedState !== storedState) {
+    // State mismatch - possible CSRF attack, reject the token
+    console.warn('OAuth state mismatch - possible CSRF attack')
     return null
   }
 

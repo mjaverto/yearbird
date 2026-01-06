@@ -104,6 +104,7 @@ function App() {
     signOut,
     accessToken,
     useTvMode,
+    isGisUnavailable,
     tvSignIn,
     toggleTvMode,
   } = useAuth()
@@ -275,6 +276,7 @@ function App() {
         isReady={isReady}
         isSigningIn={isSigningIn}
         useTvMode={useTvMode}
+        isGisUnavailable={isGisUnavailable}
         onTvSignIn={tvSignIn}
         onToggleTvMode={toggleTvMode}
       />

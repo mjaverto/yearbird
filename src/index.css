@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --font-display: 'Fraunces', 'Times New Roman', serif;
+  --font-body: 'IBM Plex Sans', 'Helvetica Neue', sans-serif;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+@layer utilities {
+  .grid-cols-31 {
+    grid-template-columns: repeat(31, minmax(0, 1fr));
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+  }
+}
+
+.landing-bg {
+  background:
+    radial-gradient(1200px 600px at 20% -10%, #fef3c7 0%, transparent 60%),
+    radial-gradient(900px 500px at 90% 10%, #d1fae5 0%, transparent 55%),
+    linear-gradient(180deg, #f8fafc 0%, #ffffff 60%);
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.reveal {
+  opacity: 0;
+  animation: reveal 0.7s ease-out forwards;
+}
+
+.float-bird {
+  animation: float 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .float-bird {
+    animation: none;
+  }
+}

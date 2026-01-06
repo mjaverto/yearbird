@@ -1,0 +1,161 @@
+import { describe, expect, it } from 'vitest'
+import type { GoogleCalendarEvent } from '../types/calendar'
+import { processEvent, processEvents } from './eventProcessor'
+
+const buildAllDayEvent = (
+  overrides: Partial<GoogleCalendarEvent> = {}
+): GoogleCalendarEvent => ({
+  id: '1',
+  summary: "Mom's birthday",
+  start: { date: '2025-01-15' },
+  end: { date: '2025-01-16' },
+  status: 'confirmed',
+  htmlLink: 'https://example.com',
+  ...overrides,
+})
+
+describe('processEvent', () => {
+  it('keeps all-day single-day events', () => {
+    const result = processEvent(buildAllDayEvent())
+
+    expect(result).not.toBeNull()
+    expect(result?.isAllDay).toBe(true)
+    expect(result?.isMultiDay).toBe(false)
+    expect(result?.durationDays).toBe(1)
+    expect(result?.startDate).toBe('2025-01-15')
+    expect(result?.endDate).toBe('2025-01-15')
+    expect(result?.category).toBe('birthdays')
+  })
+
+  it('keeps multi-day timed events', () => {
+    const event: GoogleCalendarEvent = {
+      id: '2',
+      summary: 'Conference',
+      start: { dateTime: '2025-01-15T09:00:00Z' },
+      end: { dateTime: '2025-01-17T17:00:00Z' },
+      status: 'confirmed',
+      htmlLink: 'https://example.com',
+    }
+
+    const result = processEvent(event)
+
+    expect(result).not.toBeNull()
+    expect(result?.isAllDay).toBe(false)
+    expect(result?.isMultiDay).toBe(true)
+    expect(result?.durationDays).toBe(3)
+    expect(result?.startDate).toBe('2025-01-15')
+    expect(result?.endDate).toBe('2025-01-17')
+  })
+
+  it('keeps timed events that cross midnight', () => {
+    const event: GoogleCalendarEvent = {
+      id: '3',
+      summary: 'Overnight work',
+      start: { dateTime: '2025-01-15T23:00:00-05:00' },
+      end: { dateTime: '2025-01-16T01:00:00-05:00' },
+      status: 'confirmed',
+      htmlLink: 'https://example.com',
+    }
+
+    const result = processEvent(event)
+
+    expect(result).not.toBeNull()
+    expect(result?.isMultiDay).toBe(true)
+    expect(result?.durationDays).toBe(2)
+    expect(result?.startDate).toBe('2025-01-15')
+    expect(result?.endDate).toBe('2025-01-16')
+  })
+
+  it('uses event time zone for timed events', () => {
+    const event: GoogleCalendarEvent = {
+      id: '3a',
+      summary: 'Overnight travel',
+      start: {
+        dateTime: '2025-01-01T07:00:00Z',
+        timeZone: 'America/Los_Angeles',
+      },
+      end: {
+        dateTime: '2025-01-01T10:00:00Z',
+        timeZone: 'America/Los_Angeles',
+      },
+      status: 'confirmed',
+      htmlLink: 'https://example.com',
+    }
+
+    const result = processEvent(event)
+
+    expect(result).not.toBeNull()
+    expect(result?.startDate).toBe('2024-12-31')
+    expect(result?.endDate).toBe('2025-01-01')
+    expect(result?.durationDays).toBe(2)
+  })
+
+  it('filters out single-day timed events', () => {
+    const event: GoogleCalendarEvent = {
+      id: '4',
+      summary: 'Meeting',
+      start: { dateTime: '2025-01-15T09:00:00Z' },
+      end: { dateTime: '2025-01-15T10:00:00Z' },
+      status: 'confirmed',
+      htmlLink: 'https://example.com',
+    }
+
+    const result = processEvent(event)
+
+    expect(result).toBeNull()
+  })
+
+  it('filters out cancelled events', () => {
+    const event = buildAllDayEvent({ status: 'cancelled' })
+
+    expect(processEvent(event)).toBeNull()
+  })
+
+  it('filters out invalid all-day events', () => {
+    const event = buildAllDayEvent({ start: { date: 'not-a-date' } })
+
+    expect(processEvent(event)).toBeNull()
+  })
+})
+
+describe('processEvents', () => {
+  it('filters cancelled and single-day timed events', () => {
+    const events = processEvents([
+      {
+        id: '1',
+        status: 'cancelled',
+        summary: 'Cancelled',
+        htmlLink: '',
+        start: { date: '2026-01-01' },
+        end: { date: '2026-01-02' },
+      },
+      {
+        id: '2',
+        summary: 'Single day',
+        status: 'confirmed',
+        htmlLink: '',
+        start: { dateTime: '2026-01-01T10:00:00Z' },
+        end: { dateTime: '2026-01-01T11:00:00Z' },
+      },
+      {
+        id: '3',
+        summary: 'Multi day',
+        status: 'confirmed',
+        htmlLink: '',
+        start: { date: '2026-01-01' },
+        end: { date: '2026-01-03' },
+      },
+    ])
+
+    expect(events).toHaveLength(1)
+    expect(events[0]?.id).toBe('3')
+    expect(events[0]?.isMultiDay).toBe(true)
+  })
+
+  it('filters out null results', () => {
+    const valid = buildAllDayEvent({ summary: 'Family reunion' })
+    const cancelled = buildAllDayEvent({ id: 'event-2', status: 'cancelled' })
+
+    expect(processEvents([valid, cancelled])).toHaveLength(1)
+  })
+})

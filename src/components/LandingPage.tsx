@@ -648,6 +648,10 @@ export function LandingPage({
                   className="w-full max-w-xl rounded-2xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm text-sky-900"
                 >
                   <strong>TV Mode:</strong> Using redirect-based sign-in for better compatibility.
+                  {' '}
+                  <span className="text-sky-700">
+                    If sign-in is blocked, set your browser's user agent to "Desktop Chrome" in settings.
+                  </span>
                   {useTvMode && onToggleTvMode ? (
                     <>
                       {' '}

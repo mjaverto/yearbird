@@ -653,6 +653,17 @@ export function LandingPage({
                   <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                 </span>
               </button>
+              <p className="text-xs text-zinc-400">
+                <a
+                  href="https://github.com/mjaverto/yearbird"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline decoration-zinc-300 underline-offset-2 transition hover:text-zinc-600"
+                >
+                  Open Source
+                </a>
+                {' - Your data never leaves your browser.'}
+              </p>
             </div>
           </div>
         </section>

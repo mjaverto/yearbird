@@ -26,11 +26,14 @@
     />
     <title>Yearbird - Plan a year worth winning</title>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Prevent FOUC: hide fallback content immediately when JS available -->
+    <script>document.documentElement.classList.add('js')</script>
+    <style>.js [data-fallback] { display: none; }</style>
   </head>
   <body class="m-0 p-0">
     <!-- Pre-render content for crawlers - React replaces this on hydration -->
     <div id="root">
-      <div style="max-width: 800px; margin: 0 auto; padding: 40px 20px; font-family: system-ui, sans-serif;">
+      <div data-fallback style="max-width: 800px; margin: 0 auto; padding: 40px 20px; font-family: system-ui, sans-serif;">
         <h1>Yearbird</h1>
         <p><strong>Plan a year worth winning.</strong></p>
         <p>Yearbird is a calendar visualization app that turns your Google Calendar into a giant year-at-a-glance map with 365 days on one bold screen. It is built for founders, athletes, creators, students, and anyone chasing an ambitious year who wants to stay focused and in control.</p>

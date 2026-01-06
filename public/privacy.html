@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - Yearbird</title>
+  <meta name="description" content="Yearbird Privacy Policy. Your calendar data never leaves your browser.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .prose h2 { margin-top: 2rem; margin-bottom: 1rem; }
+    .prose h3 { margin-top: 1.5rem; margin-bottom: 0.75rem; }
+    .prose p, .prose ul { margin-bottom: 1rem; }
+    .prose ul { padding-left: 1.5rem; list-style-type: disc; }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-amber-50/40 via-white to-emerald-50/30">
+  <div class="mx-auto max-w-3xl px-6 py-16">
+    <header class="mb-12">
+      <a href="/" class="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900 transition">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Back to Yearbird
+      </a>
+      <h1 class="mt-6 text-4xl font-bold text-zinc-900">Privacy Policy</h1>
+      <p class="mt-2 text-sm text-zinc-500">Last updated: January 2025</p>
+    </header>
+
+    <main class="prose prose-zinc max-w-none">
+      <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6 mb-8">
+        <p class="text-emerald-800 font-medium m-0">
+          <strong>The short version:</strong> Yearbird is a client-side application. Your calendar data is processed entirely in your browser and never sent to our servers. We don't collect, store, or have access to your personal data.
+        </p>
+      </div>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">1. Who We Are</h2>
+      <p>Yearbird is an open-source calendar visualization tool. The source code is publicly available at <a href="https://github.com/mjaverto/yearbird" class="text-emerald-600 hover:text-emerald-700 underline">github.com/mjaverto/yearbird</a>.</p>
+      <p>This Privacy Policy applies to the hosted version at yearbird.com and any self-hosted instances using the official codebase.</p>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">2. Information We Do NOT Collect</h2>
+      <p>Yearbird is designed with privacy as a core principle. We do <strong>not</strong>:</p>
+      <ul>
+        <li>Collect, store, or transmit your calendar data to any server</li>
+        <li>Use cookies for tracking or analytics</li>
+        <li>Employ any third-party analytics services</li>
+        <li>Store your Google account credentials</li>
+        <li>Access your data in any way after you close the browser tab</li>
+        <li>Sell, share, or monetize any user data (we have none to sell)</li>
+      </ul>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">3. How Yearbird Works</h2>
+      <h3 class="text-xl font-medium text-zinc-800">Client-Side Architecture</h3>
+      <p>Yearbird runs entirely in your web browser. When you sign in with Google:</p>
+      <ul>
+        <li>Your browser communicates directly with Google's servers</li>
+        <li>Calendar data is fetched directly from Google to your browser</li>
+        <li>All processing and rendering happens locally in your browser</li>
+        <li>No calendar data passes through Yearbird's servers (we don't have any)</li>
+      </ul>
+
+      <h3 class="text-xl font-medium text-zinc-800">Google OAuth Authentication</h3>
+      <p>We use Google Sign-In (OAuth 2.0) to authenticate you and access your calendar. This means:</p>
+      <ul>
+        <li>You authenticate directly with Google, not with us</li>
+        <li>We request only <code class="bg-zinc-100 px-1.5 py-0.5 rounded text-sm">calendar.readonly</code> permission (read-only access)</li>
+        <li>We cannot modify, delete, or create calendar events</li>
+        <li>Your Google password is never shared with Yearbird</li>
+      </ul>
+      <p>Google's authentication is subject to <a href="https://policies.google.com/privacy" class="text-emerald-600 hover:text-emerald-700 underline" target="_blank" rel="noopener noreferrer">Google's Privacy Policy</a>.</p>
+
+      <h3 class="text-xl font-medium text-zinc-800">Local Storage</h3>
+      <p>Yearbird stores minimal data in your browser's localStorage:</p>
+      <ul>
+        <li><strong>OAuth tokens:</strong> Temporary access tokens from Google (automatically expire)</li>
+        <li><strong>User preferences:</strong> Display settings like hidden categories and view preferences</li>
+      </ul>
+      <p>This data never leaves your browser and is cleared when you sign out or clear your browser data.</p>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">4. Third-Party Services</h2>
+      <p>Yearbird interacts with the following third-party service:</p>
+      <ul>
+        <li><strong>Google Calendar API:</strong> To fetch your calendar events. Subject to <a href="https://policies.google.com/privacy" class="text-emerald-600 hover:text-emerald-700 underline" target="_blank" rel="noopener noreferrer">Google's Privacy Policy</a> and <a href="https://policies.google.com/terms" class="text-emerald-600 hover:text-emerald-700 underline" target="_blank" rel="noopener noreferrer">Terms of Service</a>.</li>
+      </ul>
+      <p>We have no control over and assume no responsibility for the privacy practices of Google.</p>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">5. Data Security</h2>
+      <p>Because we don't collect or store your data, there is no database to breach. Your calendar data exists only:</p>
+      <ul>
+        <li>On Google's servers (protected by Google's security)</li>
+        <li>Temporarily in your browser's memory while using Yearbird</li>
+      </ul>
+      <p>All communication with Google's API uses HTTPS encryption.</p>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">6. Children's Privacy</h2>
+      <p>Yearbird is not intended for children under 13 years of age. We do not knowingly collect any information from children. If you are a parent and believe your child has used Yearbird, please note that we have no data to delete because we collect nothing.</p>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">7. Your Rights (GDPR, CCPA, and Similar Laws)</h2>
+      <p>Privacy regulations like GDPR and CCPA give you rights over your personal data. Because Yearbird does not collect, store, or process your personal data on our servers:</p>
+      <ul>
+        <li><strong>Right to Access:</strong> We have no data to provide</li>
+        <li><strong>Right to Deletion:</strong> We have no data to delete</li>
+        <li><strong>Right to Portability:</strong> We have no data to export</li>
+        <li><strong>Right to Object:</strong> We perform no processing to object to</li>
+      </ul>
+      <p>To manage your Google data, visit your <a href="https://myaccount.google.com/permissions" class="text-emerald-600 hover:text-emerald-700 underline" target="_blank" rel="noopener noreferrer">Google Account permissions</a> to revoke Yearbird's access at any time.</p>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">8. Open Source Transparency</h2>
+      <p>Yearbird is open source under the MIT License. You can:</p>
+      <ul>
+        <li>Inspect the complete source code at <a href="https://github.com/mjaverto/yearbird" class="text-emerald-600 hover:text-emerald-700 underline" target="_blank" rel="noopener noreferrer">github.com/mjaverto/yearbird</a></li>
+        <li>Verify our privacy claims by reviewing the code</li>
+        <li>Self-host your own instance for complete control</li>
+        <li>Contribute improvements or report issues</li>
+      </ul>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">9. Changes to This Policy</h2>
+      <p>We may update this Privacy Policy from time to time. Changes will be posted on this page with an updated revision date. Continued use of Yearbird after changes constitutes acceptance of the updated policy.</p>
+
+      <h2 class="text-2xl font-semibold text-zinc-900">10. Contact</h2>
+      <p>For privacy-related questions, you can:</p>
+      <ul>
+        <li>Open an issue on <a href="https://github.com/mjaverto/yearbird/issues" class="text-emerald-600 hover:text-emerald-700 underline" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+        <li>Review the source code to verify our practices</li>
+      </ul>
+    </main>
+
+    <footer class="mt-16 pt-8 border-t border-zinc-200 text-center text-sm text-zinc-500">
+      <p>&copy; 2025 Yearbird. Open source under the MIT License.</p>
+      <p class="mt-2">
+        <a href="/" class="text-emerald-600 hover:text-emerald-700">Home</a>
+        <span class="mx-2">&middot;</span>
+        <a href="/terms.html" class="text-emerald-600 hover:text-emerald-700">Terms of Service</a>
+        <span class="mx-2">&middot;</span>
+        <a href="https://github.com/mjaverto/yearbird" class="text-emerald-600 hover:text-emerald-700">GitHub</a>
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

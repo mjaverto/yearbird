@@ -855,6 +855,11 @@ export function LandingPage({
           <span>Yearbird on GitHub</span>
         </a>
         <span>Your data never leaves your browser. Built for people who think in years.</span>
+        <div className="flex items-center gap-3">
+          <a href="/privacy.html" className="transition hover:text-zinc-600">Privacy Policy</a>
+          <span aria-hidden="true">&middot;</span>
+          <a href="/terms.html" className="transition hover:text-zinc-600">Terms of Service</a>
+        </div>
         <span>&copy; {new Date().getFullYear()} Yearbird.com</span>
       </footer>
     </div>

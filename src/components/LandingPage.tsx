@@ -5,6 +5,10 @@ interface LandingPageProps {
   authNotice?: string | null
   isReady?: boolean
   isSigningIn?: boolean
+  // TV Mode props
+  useTvMode?: boolean
+  onTvSignIn?: () => void
+  onToggleTvMode?: (enabled: boolean) => void
 }
 
 const IMAGE_WIDTH = 1280
@@ -553,9 +557,25 @@ export function LandingPage({
   authNotice,
   isReady = true,
   isSigningIn = false,
+  useTvMode = false,
+  onTvSignIn,
+  onToggleTvMode,
 }: LandingPageProps) {
   const { openShot, lightbox } = useScreenshotLightbox()
   const prefersReducedMotion = usePrefersReducedMotion()
+
+  // Determine if we should show TV mode UI
+  // Show when: explicitly in TV mode, or when GIS is unavailable
+  const showTvMode = useTvMode || authNotice?.includes('unavailable')
+
+  // Handler for sign-in that routes to the appropriate flow
+  const handleSignIn = useCallback(() => {
+    if (showTvMode && onTvSignIn) {
+      onTvSignIn()
+    } else {
+      onSignIn()
+    }
+  }, [showTvMode, onTvSignIn, onSignIn])
 
   return (
     <div className="landing-bg relative min-h-screen w-screen overflow-hidden text-zinc-950">
@@ -611,7 +631,8 @@ export function LandingPage({
             </p>
 
             <div className="mt-10 flex flex-col items-center gap-5">
-              {authNotice ? (
+              {/* Show auth notice, but not "unavailable" when TV mode is active */}
+              {authNotice && !(showTvMode && authNotice.includes('unavailable')) ? (
                 <div
                   role="alert"
                   className="w-full max-w-xl rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"
@@ -619,10 +640,30 @@ export function LandingPage({
                   {authNotice}
                 </div>
               ) : null}
+              {/* TV Mode notice when active */}
+              {showTvMode ? (
+                <div
+                  className="w-full max-w-xl rounded-2xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm text-sky-900"
+                >
+                  <strong>TV Mode:</strong> Using redirect-based sign-in for better compatibility.
+                  {useTvMode && onToggleTvMode ? (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        onClick={() => onToggleTvMode(false)}
+                        className="underline decoration-sky-300 underline-offset-2 transition hover:text-sky-700"
+                      >
+                        Switch back to popup mode
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
               <button
                 type="button"
-                onClick={onSignIn}
-                disabled={!isReady}
+                onClick={handleSignIn}
+                disabled={!showTvMode && !isReady}
                 aria-busy={isSigningIn}
                 className="relative inline-flex items-center justify-center gap-3 rounded-full border border-zinc-300 bg-white px-8 py-4 text-base font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
               >
@@ -644,7 +685,7 @@ export function LandingPage({
                     d="M24 48c6.48 0 11.93-2.13 15.9-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.17 2.3-6.26 0-11.59-3.86-13.47-9.19l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
                   />
                 </svg>
-                <span>Sign in with Google</span>
+                <span>Sign in with Google{showTvMode ? ' (TV Mode)' : ''}</span>
                 {isSigningIn ? (
                   <span className="absolute right-4 flex h-5 w-5 items-center justify-center">
                     <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
@@ -661,6 +702,18 @@ export function LandingPage({
                   Open Source
                 </a>
                 {' - Your data never leaves your browser.'}
+                {!showTvMode && onToggleTvMode ? (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      onClick={() => onToggleTvMode(true)}
+                      className="underline decoration-zinc-300 underline-offset-2 transition hover:text-zinc-600"
+                    >
+                      Try TV Mode
+                    </button>
+                  </>
+                ) : null}
               </p>
               <p className="text-xs text-zinc-400">
                 <a href="/privacy.html" className="underline decoration-zinc-300 underline-offset-2 transition hover:text-zinc-600">Privacy Policy</a>
@@ -760,8 +813,8 @@ export function LandingPage({
             </p>
             <button
               type="button"
-              onClick={onSignIn}
-              disabled={!isReady}
+              onClick={handleSignIn}
+              disabled={!showTvMode && !isReady}
               aria-busy={isSigningIn}
               className="relative inline-flex items-center justify-center gap-3 rounded-full border border-zinc-300 bg-white px-8 py-4 text-base font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
             >
@@ -783,7 +836,7 @@ export function LandingPage({
                   d="M24 48c6.48 0 11.93-2.13 15.9-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.17 2.3-6.26 0-11.59-3.86-13.47-9.19l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
                 />
               </svg>
-              <span>Sign in with Google</span>
+              <span>Sign in with Google{showTvMode ? ' (TV Mode)' : ''}</span>
               {isSigningIn ? (
                 <span className="absolute right-4 flex h-5 w-5 items-center justify-center">
                   <span className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />

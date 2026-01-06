@@ -1,7 +1,10 @@
 import { clearEventCaches } from './cache'
 
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly'
+/** Google OAuth client ID from environment */
+export const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+
+/** OAuth scope for read-only calendar access */
+export const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly'
 
 const ACCESS_TOKEN_KEY = 'yearbird:accessToken'
 const EXPIRES_AT_KEY = 'yearbird:expiresAt'

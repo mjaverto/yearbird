@@ -95,7 +95,18 @@ const loadScrollDensity = () => {
 }
 
 function App() {
-  const { isAuthenticated, isReady, isSigningIn, authNotice, signIn, signOut, accessToken } = useAuth()
+  const {
+    isAuthenticated,
+    isReady,
+    isSigningIn,
+    authNotice,
+    signIn,
+    signOut,
+    accessToken,
+    useTvMode,
+    tvSignIn,
+    toggleTvMode,
+  } = useAuth()
   const fixedDate = getFixedDate()
   const now = fixedDate ?? new Date()
   const currentYear = now.getFullYear()
@@ -263,6 +274,9 @@ function App() {
         authNotice={authNotice}
         isReady={isReady}
         isSigningIn={isSigningIn}
+        useTvMode={useTvMode}
+        onTvSignIn={tvSignIn}
+        onToggleTvMode={toggleTvMode}
       />
     )
   }

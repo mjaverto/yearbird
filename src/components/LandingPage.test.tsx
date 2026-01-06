@@ -26,12 +26,12 @@ describe('LandingPage', () => {
     render(
       <LandingPage
         onSignIn={vi.fn()}
-        authNotice="Sign-in is temporarily unavailable."
+        authNotice="Session expired. Sign in again."
       />
     )
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Sign-in is temporarily unavailable.'
+      'Session expired. Sign in again.'
     )
   })
 
@@ -52,9 +52,9 @@ describe('LandingPage', () => {
     expect(button).not.toBeDisabled()
     expect(button).toHaveAttribute('aria-busy', 'true')
 
+    // Spinner is conditionally rendered when signing in
     const spinner = button.querySelector('span.flex')
     expect(spinner).not.toBeNull()
-    expect(spinner).toHaveClass('opacity-100')
   })
 
   it('renders hero and mid-page sign-in buttons', () => {
@@ -87,8 +87,9 @@ describe('LandingPage', () => {
     const buttons = screen.getAllByRole('button', { name: 'Sign in with Google' })
     buttons.forEach((button) => {
       expect(button).toHaveAttribute('aria-busy', 'false')
+      // Spinner is not rendered when not signing in
       const spinner = button.querySelector('span.flex')
-      expect(spinner).toHaveClass('opacity-0')
+      expect(spinner).toBeNull()
     })
   })
 

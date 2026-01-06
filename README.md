@@ -9,7 +9,7 @@
 
 Yearbird is a year-at-a-glance calendar visualization that syncs with your Google Calendar. See all 365 days on one screen with color-coded events, making it easy to spot patterns, plan ahead, and understand how you spend your time.
 
-**[Live demo →](https://yearbird.com)**
+**[Live product →](https://yearbird.com)**
 
 ## Features
 

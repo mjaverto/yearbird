@@ -4,7 +4,6 @@ import {
   saveSyncSettings,
   isSyncEnabled,
   getSyncStatus,
-  buildCloudConfigFromLocal,
   mergeConfigs,
   applyCloudConfigToLocal,
   clearSyncError,

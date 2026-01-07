@@ -10,6 +10,7 @@ import {
   disableSync,
   performSync,
   isSyncEnabled,
+  initSyncListeners,
 } from '../services/syncManager'
 
 interface UseCloudSyncResult {
@@ -54,17 +55,21 @@ export function useCloudSync(): UseCloudSyncResult {
     setHasDriveAccess(hasDriveScope())
   }, [])
 
-  // Listen for online/offline events
+  // Initialize sync manager listeners and listen for online/offline events
   useEffect(() => {
-    const handleOnline = () => refreshState()
-    const handleOffline = () => refreshState()
+    // Initialize sync manager (handles actual sync on online)
+    const cleanupSyncListeners = initSyncListeners()
 
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
+    // Local UI state refresh on connectivity changes
+    const handleConnectivityChange = () => refreshState()
+
+    window.addEventListener('online', handleConnectivityChange)
+    window.addEventListener('offline', handleConnectivityChange)
 
     return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
+      cleanupSyncListeners()
+      window.removeEventListener('online', handleConnectivityChange)
+      window.removeEventListener('offline', handleConnectivityChange)
     }
   }, [refreshState])
 
@@ -110,9 +115,9 @@ export function useCloudSync(): UseCloudSyncResult {
       return false
     }
     setStatus('syncing')
-    const success = await performSync()
+    const result = await performSync()
     refreshState()
-    return success
+    return result.status === 'success'
   }, [isEnabled, refreshState])
 
   const clearError = useCallback(() => {

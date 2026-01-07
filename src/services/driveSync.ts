@@ -10,13 +10,139 @@
  * @see https://developers.google.com/workspace/drive/api/guides/appdata
  */
 
-import type { CloudConfig } from '../types/cloudConfig'
+import type { CloudConfig, EventFilter, CloudCustomCategory } from '../types/cloudConfig'
+import type { BuiltInCategory } from '../types/calendar'
 import { getStoredAuth } from './auth'
+
+/** Maximum allowed length for string fields to prevent abuse */
+const MAX_STRING_LENGTH = 1000
+/** Maximum number of items in arrays */
+const MAX_ARRAY_LENGTH = 500
+
+/**
+ * Validate and sanitize a CloudConfig from Drive.
+ * Returns null if the config is invalid or malformed.
+ */
+function validateCloudConfig(data: unknown): CloudConfig | null {
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+
+  const config = data as Record<string, unknown>
+
+  // Validate version
+  if (config.version !== 1) {
+    console.warn('Invalid cloud config version:', config.version)
+    return null
+  }
+
+  // Validate updatedAt
+  if (typeof config.updatedAt !== 'number' || !Number.isFinite(config.updatedAt)) {
+    return null
+  }
+
+  // Validate deviceId
+  if (typeof config.deviceId !== 'string' || config.deviceId.length > MAX_STRING_LENGTH) {
+    return null
+  }
+
+  // Validate filters array
+  if (!Array.isArray(config.filters) || config.filters.length > MAX_ARRAY_LENGTH) {
+    return null
+  }
+  const filters: EventFilter[] = []
+  for (const f of config.filters) {
+    if (!isValidFilter(f)) continue
+    filters.push(f as EventFilter)
+  }
+
+  // Validate disabledCalendars array
+  if (!Array.isArray(config.disabledCalendars) || config.disabledCalendars.length > MAX_ARRAY_LENGTH) {
+    return null
+  }
+  const disabledCalendars: string[] = []
+  for (const cal of config.disabledCalendars) {
+    if (typeof cal === 'string' && cal.length <= MAX_STRING_LENGTH) {
+      disabledCalendars.push(cal)
+    }
+  }
+
+  // Validate disabledBuiltInCategories array
+  if (!Array.isArray(config.disabledBuiltInCategories) || config.disabledBuiltInCategories.length > MAX_ARRAY_LENGTH) {
+    return null
+  }
+  const validBuiltInCategories = ['birthdays', 'family', 'holidays', 'adventures', 'races', 'work']
+  const disabledBuiltInCategories: BuiltInCategory[] = []
+  for (const cat of config.disabledBuiltInCategories) {
+    if (typeof cat === 'string' && validBuiltInCategories.includes(cat)) {
+      disabledBuiltInCategories.push(cat as BuiltInCategory)
+    }
+  }
+
+  // Validate customCategories array
+  if (!Array.isArray(config.customCategories) || config.customCategories.length > MAX_ARRAY_LENGTH) {
+    return null
+  }
+  const customCategories: CloudCustomCategory[] = []
+  for (const cat of config.customCategories) {
+    if (!isValidCustomCategory(cat)) continue
+    customCategories.push(cat as CloudCustomCategory)
+  }
+
+  return {
+    version: 1,
+    updatedAt: config.updatedAt,
+    deviceId: config.deviceId,
+    filters,
+    disabledCalendars,
+    disabledBuiltInCategories,
+    customCategories,
+  }
+}
+
+function isValidFilter(f: unknown): boolean {
+  if (!f || typeof f !== 'object') return false
+  const filter = f as Record<string, unknown>
+  return (
+    typeof filter.id === 'string' &&
+    filter.id.length <= MAX_STRING_LENGTH &&
+    typeof filter.pattern === 'string' &&
+    filter.pattern.length <= MAX_STRING_LENGTH &&
+    typeof filter.createdAt === 'number' &&
+    Number.isFinite(filter.createdAt)
+  )
+}
+
+function isValidCustomCategory(c: unknown): boolean {
+  if (!c || typeof c !== 'object') return false
+  const cat = c as Record<string, unknown>
+  return (
+    typeof cat.id === 'string' &&
+    cat.id.length <= MAX_STRING_LENGTH &&
+    typeof cat.label === 'string' &&
+    cat.label.length <= MAX_STRING_LENGTH &&
+    typeof cat.color === 'string' &&
+    cat.color.length <= 20 &&
+    Array.isArray(cat.keywords) &&
+    cat.keywords.length <= MAX_ARRAY_LENGTH &&
+    cat.keywords.every((k: unknown) => typeof k === 'string' && (k as string).length <= MAX_STRING_LENGTH) &&
+    (cat.matchMode === 'any' || cat.matchMode === 'all') &&
+    typeof cat.createdAt === 'number' &&
+    Number.isFinite(cat.createdAt) &&
+    typeof cat.updatedAt === 'number' &&
+    Number.isFinite(cat.updatedAt)
+  )
+}
 
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3'
 const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 const CONFIG_FILENAME = 'yearbird-config.json'
 const MIME_TYPE = 'application/json'
+
+/** Maximum retry attempts for transient failures */
+const MAX_RETRIES = 3
+/** Base delay for exponential backoff (ms) */
+const BASE_RETRY_DELAY_MS = 1000
 
 export interface DriveError {
   code: number
@@ -44,11 +170,29 @@ function getAuthHeaders(): HeadersInit | null {
 }
 
 /**
- * Make an authenticated request to the Drive API
+ * Check if an error is retryable (transient)
+ */
+function isRetryableError(code: number): boolean {
+  // 5xx server errors and specific retryable codes
+  return code >= 500 || code === 429 || code === 0 // 0 = network error
+}
+
+/**
+ * Sleep for a given duration
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * Make an authenticated request to the Drive API with retry logic.
+ * Retries on transient failures (5xx, 429, network errors) with exponential backoff.
+ * Does NOT retry on 401 (auth errors) - caller should handle token refresh.
  */
 async function driveRequest<T>(
   url: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retryCount = 0
 ): Promise<DriveSyncResult<T>> {
   const authHeaders = getAuthHeaders()
   if (!authHeaders) {
@@ -69,14 +213,22 @@ async function driveRequest<T>(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      return {
-        success: false,
-        error: {
-          code: response.status,
-          message: errorData.error?.message || response.statusText,
-          status: errorData.error?.status,
-        },
+      const errorCode = response.status
+      const error: DriveError = {
+        code: errorCode,
+        message: errorData.error?.message || response.statusText,
+        status: errorData.error?.status,
       }
+
+      // Retry transient errors with exponential backoff
+      if (isRetryableError(errorCode) && retryCount < MAX_RETRIES) {
+        const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount)
+        console.warn(`Drive API error ${errorCode}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
+        await sleep(delay)
+        return driveRequest<T>(url, options, retryCount + 1)
+      }
+
+      return { success: false, error }
     }
 
     // Handle 204 No Content
@@ -87,13 +239,20 @@ async function driveRequest<T>(
     const data = await response.json()
     return { success: true, data }
   } catch (error) {
-    return {
-      success: false,
-      error: {
-        code: 0,
-        message: error instanceof Error ? error.message : 'Network error',
-      },
+    const networkError: DriveError = {
+      code: 0,
+      message: error instanceof Error ? error.message : 'Network error',
     }
+
+    // Retry network errors with exponential backoff
+    if (retryCount < MAX_RETRIES) {
+      const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount)
+      console.warn(`Network error, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
+      await sleep(delay)
+      return driveRequest<T>(url, options, retryCount + 1)
+    }
+
+    return { success: false, error: networkError }
   }
 }
 
@@ -132,7 +291,8 @@ export async function findConfigFile(): Promise<DriveSyncResult<DriveFile | null
 }
 
 /**
- * Read the cloud config from appDataFolder
+ * Read the cloud config from appDataFolder.
+ * Validates the config structure before returning.
  */
 export async function readCloudConfig(): Promise<DriveSyncResult<CloudConfig | null>> {
   // First, find the config file
@@ -151,7 +311,7 @@ export async function readCloudConfig(): Promise<DriveSyncResult<CloudConfig | n
     alt: 'media',
   })
 
-  const result = await driveRequest<CloudConfig>(
+  const result = await driveRequest<unknown>(
     `${DRIVE_API_BASE}/files/${findResult.data.id}?${params.toString()}`
   )
 
@@ -159,7 +319,19 @@ export async function readCloudConfig(): Promise<DriveSyncResult<CloudConfig | n
     return { success: false, error: result.error }
   }
 
-  return { success: true, data: result.data ?? null }
+  // Validate the config structure
+  const validatedConfig = validateCloudConfig(result.data)
+  if (!validatedConfig) {
+    return {
+      success: false,
+      error: {
+        code: 400,
+        message: 'Invalid cloud config structure',
+      },
+    }
+  }
+
+  return { success: true, data: validatedConfig }
 }
 
 /**

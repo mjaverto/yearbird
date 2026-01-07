@@ -13,7 +13,6 @@ import type {
   CloudConfig,
   CloudCustomCategory,
   CloudSyncSettings,
-  EventFilter,
   SyncStatus,
 } from '../types/cloudConfig'
 import { hasDriveScope } from './auth'
@@ -156,33 +155,36 @@ export function buildCloudConfigFromLocal(): CloudConfig {
 
 /**
  * Merge local and remote configs.
- * Strategy: Last-write-wins with timestamps, union for additive data.
+ *
+ * Strategy: Last-write-wins based on updatedAt timestamp.
+ * - Arrays (filters, disabledCalendars, disabledBuiltInCategories) use whole-array last-write-wins
+ *   to properly handle deletions (union would resurrect deleted items)
+ * - Custom categories merge by ID with per-item updatedAt for granular conflict resolution
  */
 export function mergeConfigs(
   local: CloudConfig,
   remote: CloudConfig
 ): CloudConfig {
   const settings = getSyncSettings()
+  const remoteIsNewer = remote.updatedAt >= local.updatedAt
 
-  // Merge filters - union by pattern (case-insensitive dedupe)
-  const filterMap = new Map<string, EventFilter>()
-  for (const filter of [...remote.filters, ...local.filters]) {
-    const key = filter.pattern.toLowerCase()
-    const existing = filterMap.get(key)
-    if (!existing || filter.createdAt > existing.createdAt) {
-      filterMap.set(key, filter)
-    }
-  }
+  // Filters - last-write-wins (whole array)
+  // Using union would resurrect deleted filters, so we take the newer array
+  const filters = remoteIsNewer ? remote.filters : local.filters
 
-  // Merge disabled calendars - union
-  const disabledCalendars = [...new Set([...remote.disabledCalendars, ...local.disabledCalendars])]
+  // Disabled calendars - last-write-wins (whole array)
+  // Union would prevent re-enabling calendars across devices
+  const disabledCalendars = remoteIsNewer
+    ? remote.disabledCalendars
+    : local.disabledCalendars
 
-  // Merge disabled built-in categories - remote wins (last-write-wins)
-  const disabledBuiltInCategories = remote.updatedAt >= local.updatedAt
+  // Disabled built-in categories - last-write-wins (whole array)
+  const disabledBuiltInCategories = remoteIsNewer
     ? remote.disabledBuiltInCategories
     : local.disabledBuiltInCategories
 
-  // Merge custom categories - by ID, updatedAt wins
+  // Custom categories - merge by ID with per-item updatedAt
+  // This allows granular updates while still supporting deletions via updatedAt
   const categoryMap = new Map<CustomCategoryId, CloudCustomCategory>()
   for (const cat of remote.customCategories) {
     categoryMap.set(cat.id, cat)
@@ -198,7 +200,7 @@ export function mergeConfigs(
     version: 1,
     updatedAt: Date.now(),
     deviceId: settings.deviceId,
-    filters: Array.from(filterMap.values()),
+    filters,
     disabledCalendars,
     disabledBuiltInCategories,
     customCategories: Array.from(categoryMap.values()),
@@ -253,19 +255,26 @@ export function applyCloudConfigToLocal(config: CloudConfig): void {
   }
 }
 
+export type SyncResult =
+  | { status: 'success' }
+  | { status: 'skipped'; reason: 'disabled' | 'already-syncing' | 'offline' }
+  | { status: 'error'; message: string }
+
 /**
  * Perform a full sync with Google Drive.
  * - Reads from Drive
  * - Merges with local if both exist
  * - Writes merged result back to both Drive and localStorage
+ *
+ * Returns detailed result indicating success, skip reason, or error.
  */
-export async function performSync(): Promise<boolean> {
+export async function performSync(): Promise<SyncResult> {
   if (!isSyncEnabled()) {
-    return false
+    return { status: 'skipped', reason: 'disabled' }
   }
 
   if (isSyncing) {
-    return false
+    return { status: 'skipped', reason: 'already-syncing' }
   }
 
   isSyncing = true
@@ -277,17 +286,17 @@ export async function performSync(): Promise<boolean> {
     if (!canAccess) {
       if (!navigator.onLine) {
         // Offline - not an error, just skip sync
-        return false
+        return { status: 'skipped', reason: 'offline' }
       }
       lastSyncError = 'Cannot access Google Drive'
-      return false
+      return { status: 'error', message: lastSyncError }
     }
 
     // Read from Drive
     const remoteResult = await readCloudConfig()
     if (!remoteResult.success) {
       lastSyncError = remoteResult.error?.message || 'Failed to read from Drive'
-      return false
+      return { status: 'error', message: lastSyncError }
     }
 
     const localConfig = buildCloudConfigFromLocal()
@@ -305,16 +314,16 @@ export async function performSync(): Promise<boolean> {
     const writeResult = await writeCloudConfig(configToWrite)
     if (!writeResult.success) {
       lastSyncError = writeResult.error?.message || 'Failed to write to Drive'
-      return false
+      return { status: 'error', message: lastSyncError }
     }
 
     // Apply merged config to localStorage
     applyCloudConfigToLocal(configToWrite)
 
-    return true
+    return { status: 'success' }
   } catch (error) {
     lastSyncError = error instanceof Error ? error.message : 'Sync failed'
-    return false
+    return { status: 'error', message: lastSyncError }
   } finally {
     isSyncing = false
   }
@@ -336,7 +345,8 @@ export async function enableSync(): Promise<boolean> {
   })
 
   // Perform initial sync
-  return performSync()
+  const result = await performSync()
+  return result.status === 'success'
 }
 
 /**
@@ -438,7 +448,24 @@ export function handleOnline(): void {
   }
 }
 
-// Set up online listener
-if (typeof window !== 'undefined') {
+/**
+ * Initialize sync manager event listeners.
+ * Call this once on app startup.
+ * Returns a cleanup function to remove listeners.
+ */
+export function initSyncListeners(): () => void {
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+
   window.addEventListener('online', handleOnline)
+
+  return () => {
+    window.removeEventListener('online', handleOnline)
+    // Clear any pending debounce timer
+    if (syncDebounceTimer !== null) {
+      window.clearTimeout(syncDebounceTimer)
+      syncDebounceTimer = null
+    }
+  }
 }

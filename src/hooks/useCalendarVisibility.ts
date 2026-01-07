@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { GoogleCalendarListEntry } from '../types/calendar'
 import { getDisabledCalendars, setDisabledCalendars } from '../services/calendarVisibility'
+import { scheduleSyncToCloud } from '../services/syncManager'
 
 interface UseCalendarVisibilityResult {
   disabledCalendarIds: string[]
@@ -43,6 +44,7 @@ export function useCalendarVisibility(
         }
         const next = [...cleaned, id]
         setDisabledCalendars(next)
+        scheduleSyncToCloud()
         return next
       })
     },
@@ -58,6 +60,7 @@ export function useCalendarVisibility(
         }
         const next = cleaned.filter((entry) => entry !== id)
         setDisabledCalendars(next)
+        scheduleSyncToCloud()
         return next
       })
     },

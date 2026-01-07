@@ -7,6 +7,7 @@ import {
   type CustomCategoryInput,
   type CustomCategoryResult,
 } from '../services/customCategories'
+import { scheduleSyncToCloud } from '../services/syncManager'
 import type { CustomCategoryId } from '../types/calendar'
 import type { CustomCategory } from '../types/categories'
 
@@ -26,6 +27,7 @@ export function useCustomCategories(): UseCustomCategoriesResult {
     const result = addCustomCategory(input)
     if (result.category) {
       setCustomCategories((prev) => [...prev, result.category!])
+      scheduleSyncToCloud()
     }
     return result
   }, [])
@@ -36,6 +38,7 @@ export function useCustomCategories(): UseCustomCategoriesResult {
       setCustomCategories((prev) =>
         prev.map((entry) => (entry.id === id ? result.category! : entry))
       )
+      scheduleSyncToCloud()
     }
     return result
   }, [])
@@ -43,6 +46,7 @@ export function useCustomCategories(): UseCustomCategoriesResult {
   const handleRemove = useCallback((id: CustomCategoryId) => {
     removeCustomCategory(id)
     setCustomCategories((prev) => prev.filter((entry) => entry.id !== id))
+    scheduleSyncToCloud()
   }, [])
 
   return {

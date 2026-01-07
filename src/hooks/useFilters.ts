@@ -6,6 +6,7 @@ import {
   removeFilter,
   type EventFilter,
 } from '../services/filters'
+import { scheduleSyncToCloud } from '../services/syncManager'
 import type { YearbirdEvent } from '../types/calendar'
 
 interface UseFiltersResult {
@@ -25,11 +26,13 @@ export function useFilters(): UseFiltersResult {
     }
     addFilter(trimmed)
     setFilters(getFilters())
+    scheduleSyncToCloud()
   }, [])
 
   const remove = useCallback((id: string) => {
     removeFilter(id)
     setFilters((prev) => prev.filter((filter) => filter.id !== id))
+    scheduleSyncToCloud()
   }, [])
 
   const filterEvents = useCallback(

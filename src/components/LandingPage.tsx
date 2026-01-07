@@ -650,7 +650,7 @@ export function LandingPage({
                   <strong>TV Mode:</strong> Using redirect-based sign-in for better compatibility.
                   {' '}
                   <span className="text-sky-700">
-                    If sign-in is blocked, set your browser's user agent to "Desktop Chrome" in settings.
+                    If sign-in is blocked, set your browser&apos;s user agent to &quot;Desktop Chrome&quot; in settings.
                   </span>
                   {useTvMode && onToggleTvMode ? (
                     <>

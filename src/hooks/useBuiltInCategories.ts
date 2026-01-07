@@ -4,6 +4,7 @@ import {
   enableBuiltInCategory,
   getDisabledBuiltInCategories,
 } from '../services/builtInCategories'
+import { scheduleSyncToCloud } from '../services/syncManager'
 import type { BuiltInCategory } from '../types/calendar'
 
 interface UseBuiltInCategoriesResult {
@@ -20,11 +21,13 @@ export function useBuiltInCategories(): UseBuiltInCategoriesResult {
   const handleDisable = useCallback((category: BuiltInCategory) => {
     const next = disableBuiltInCategory(category)
     setDisabledBuiltInCategories(next)
+    scheduleSyncToCloud()
   }, [])
 
   const handleEnable = useCallback((category: BuiltInCategory) => {
     const next = enableBuiltInCategory(category)
     setDisabledBuiltInCategories(next)
+    scheduleSyncToCloud()
   }, [])
 
   return {

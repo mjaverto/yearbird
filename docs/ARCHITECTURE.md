@@ -52,15 +52,17 @@ The app uses 100% of the viewport to maximize the year view.
 
 User preferences and cached events are stored in localStorage:
 
-| Key | Contents | TTL |
-|-----|----------|-----|
-| `yearbird:accessToken` | OAuth access token | Until expiry |
-| `yearbird:expiresAt` | Token expiry timestamp | — |
-| `yearbird:events:{year}` | Cached calendar events | 24 hours |
-| `yearbird:filters` | Hidden event patterns | Permanent |
-| `yearbird:disabled-calendars` | Disabled calendars | Permanent |
-| `yearbird:disabled-built-in-categories` | Disabled built-in categories | Permanent |
-| `yearbird:custom-categories` | User-defined category rules | Permanent |
+| Key | Contents | TTL | Cloud Sync |
+|-----|----------|-----|------------|
+| `yearbird:accessToken` | OAuth access token | Until expiry | No |
+| `yearbird:expiresAt` | Token expiry timestamp | — | No |
+| `yearbird:grantedScopes` | OAuth scopes granted | — | No |
+| `yearbird:events:{year}` | Cached calendar events | 24 hours | No |
+| `yearbird:filters` | Hidden event patterns | Permanent | **Yes** |
+| `yearbird:disabled-calendars` | Disabled calendars | Permanent | **Yes** |
+| `yearbird:disabled-built-in-categories` | Disabled built-in categories | Permanent | **Yes** |
+| `yearbird:custom-categories` | User-defined category rules | Permanent | **Yes** |
+| `yearbird:cloud-sync-settings` | Cloud sync state | Permanent | No |
 
 `yearbird:custom-categories` is stored as `{ version, categories }` for safe migrations.
 
@@ -69,6 +71,52 @@ User preferences and cached events are stored in localStorage:
 - No server needed
 - Simple API
 - ~5MB storage limit is plenty for calendar data
+
+### Cloud Sync (Optional)
+
+User preferences can optionally be synced to Google Drive's **appDataFolder** for cross-device access:
+
+| Aspect | Details |
+|--------|---------|
+| **Scope** | `https://www.googleapis.com/auth/drive.appdata` (non-sensitive) |
+| **Storage** | Single `yearbird-config.json` in appDataFolder |
+| **Privacy** | Private to this app; hidden from user's Drive UI |
+| **Strategy** | Drive as primary, localStorage as cache |
+
+**Sync Flow:**
+```
+User Action (e.g., add filter)
+        │
+        ▼
+┌──────────────────┐
+│  Update State    │
+│  (React state)   │
+└────────┬─────────┘
+         │
+    ┌────┴────┐
+    │         │
+    ▼         ▼
+┌───────┐  ┌──────────────┐
+│ local │  │ Drive (async)│
+│Storage│  │ debounced 2s │
+└───────┘  └──────────────┘
+
+On next app load:
+  1. Fetch from Drive
+  2. Merge with local (newer wins)
+  3. Update localStorage cache
+```
+
+**Conflict Resolution:**
+- Filters: Union by pattern (case-insensitive dedupe)
+- Disabled calendars: Union of sets
+- Disabled built-in categories: Last-write-wins by timestamp
+- Custom categories: Merge by ID, `updatedAt` timestamp wins
+
+**Offline Handling:**
+- Changes write to localStorage immediately
+- Drive sync queues for when online
+- Graceful fallback to localStorage-only mode
 
 ### Event Filtering Strategy
 

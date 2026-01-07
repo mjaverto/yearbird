@@ -106,3 +106,17 @@ This is normal for unverified apps. Click:
 - Your calendar data never leaves your browser
 - OAuth tokens are stored in localStorage (cleared on sign out)
 - We don't store any data on servers
+
+## Cloud Sync (Optional)
+
+If you enable cloud sync in settings, Yearbird will request an additional scope:
+
+- `drive.appdata` — Allows storing your settings in a private app folder in Google Drive
+
+This is a **non-sensitive scope** that:
+- Only allows access to Yearbird's own private folder
+- Cannot read or modify any other files in your Drive
+- Data is hidden from your Drive UI
+- Enables syncing your filters and categories across devices
+
+You can enable cloud sync from the Filters panel. This will prompt for consent to the Drive scope.

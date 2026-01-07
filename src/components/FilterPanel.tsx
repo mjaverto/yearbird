@@ -9,6 +9,7 @@ import type {
 } from '../types/calendar'
 import type { EventFilter } from '../services/filters'
 import { secondaryActionClasses } from '../styles/secondaryActions'
+import { CloudSyncToggle } from './CloudSyncToggle'
 import { CustomCategoryManager } from './CustomCategoryManager'
 import { Button } from './ui/button'
 
@@ -405,6 +406,10 @@ export function FilterPanel({
                 onRemoveCustomCategory={onRemoveCustomCategory}
               />
             </div>
+          </div>
+
+          <div className="mt-3 border-t border-zinc-100 pt-3">
+            <CloudSyncToggle />
           </div>
         </Dialog.Panel>
       </div>

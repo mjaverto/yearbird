@@ -4,10 +4,20 @@ import { clearEventCaches } from './cache'
 export const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
 
 /** OAuth scope for read-only calendar access */
-export const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly'
+export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
+
+/** OAuth scope for app-private Google Drive storage */
+export const DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
+
+/** Combined scopes for calendar + cloud sync */
+export const ALL_SCOPES = `${CALENDAR_SCOPE} ${DRIVE_APPDATA_SCOPE}`
+
+/** @deprecated Use CALENDAR_SCOPE instead */
+export const SCOPES = CALENDAR_SCOPE
 
 const ACCESS_TOKEN_KEY = 'yearbird:accessToken'
 const EXPIRES_AT_KEY = 'yearbird:expiresAt'
+const GRANTED_SCOPES_KEY = 'yearbird:grantedScopes'
 
 let tokenClient: google.accounts.oauth2.TokenClient | null = null
 let successHandler: ((response: google.accounts.oauth2.TokenResponse) => void) | null = null
@@ -150,10 +160,13 @@ export function getStoredAuth(): { accessToken: string; expiresAt: number } | nu
   return { accessToken, expiresAt }
 }
 
-export function storeAuth(token: string, expiresIn: number) {
+export function storeAuth(token: string, expiresIn: number, scopes?: string) {
   const expiresAt = Date.now() + expiresIn * 1000
   localStorage.setItem(ACCESS_TOKEN_KEY, token)
   localStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString())
+  if (scopes) {
+    localStorage.setItem(GRANTED_SCOPES_KEY, scopes)
+  }
   return expiresAt
 }
 
@@ -161,11 +174,89 @@ export function clearStoredAuth() {
   try {
     localStorage.removeItem(ACCESS_TOKEN_KEY)
     localStorage.removeItem(EXPIRES_AT_KEY)
+    localStorage.removeItem(GRANTED_SCOPES_KEY)
   } catch {
     // Ignore storage access issues (private mode, quota, etc.)
   }
 
   clearEventCaches()
+}
+
+/**
+ * Get the granted scopes from the last OAuth response.
+ * Returns null if no scopes are stored.
+ */
+export function getGrantedScopes(): string | null {
+  try {
+    return localStorage.getItem(GRANTED_SCOPES_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check if the user has granted the Drive appdata scope.
+ */
+export function hasDriveScope(): boolean {
+  const scopes = getGrantedScopes()
+  if (!scopes) {
+    return false
+  }
+  return scopes.includes(DRIVE_APPDATA_SCOPE)
+}
+
+/**
+ * Request additional Drive scope for cloud sync.
+ * This will show a consent popup to the user.
+ * Returns a promise that resolves to true if consent was granted.
+ */
+export function requestDriveScope(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!CLIENT_ID) {
+      console.warn('Missing VITE_GOOGLE_CLIENT_ID')
+      resolve(false)
+      return
+    }
+
+    if (!isGoogleReady()) {
+      console.warn('Google Identity Services not ready')
+      resolve(false)
+      return
+    }
+
+    // Create a new token client with both scopes
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: ALL_SCOPES,
+      callback: (response) => {
+        if (response.error) {
+          console.error('Drive scope request failed:', response.error)
+          resolve(false)
+          return
+        }
+
+        // Store the new token with updated scopes
+        storeAuth(response.access_token, response.expires_in, response.scope)
+
+        // Notify the main auth handler if set
+        if (successHandler) {
+          successHandler(response)
+        }
+
+        // Check if Drive scope was actually granted
+        const granted = response.scope.includes(DRIVE_APPDATA_SCOPE)
+        resolve(granted)
+      },
+      error_callback: (error) => {
+        console.error('Drive scope request error:', error)
+        resolve(false)
+      },
+    })
+
+    // Request with consent prompt to ensure the user sees the new scope
+    ensureOpenPatched()
+    client.requestAccessToken({ prompt: 'consent' })
+  })
 }
 
 if (typeof window !== 'undefined') {

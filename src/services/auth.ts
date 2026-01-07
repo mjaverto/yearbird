@@ -97,7 +97,7 @@ export function initializeAuth(onSuccess: (response: google.accounts.oauth2.Toke
 
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
-    scope: SCOPES,
+    scope: ALL_SCOPES, // Request calendar + drive.appdata upfront for Cloud Sync
     callback: onSuccess,
   })
   return true

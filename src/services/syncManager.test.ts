@@ -15,6 +15,7 @@ import {
   initSyncListeners,
   handleOnline,
   getLastSyncError,
+  isEmptyConfig,
 } from './syncManager'
 import type { CloudConfig, CloudSyncSettings } from '../types/cloudConfig'
 
@@ -116,53 +117,47 @@ describe('syncManager', () => {
   })
 
   describe('isSyncEnabled', () => {
-    it('returns false when sync is disabled', () => {
-      expect(isSyncEnabled()).toBe(false)
-    })
-
-    it('returns true when sync is enabled and has drive scope', async () => {
+    it('returns true when user has drive scope (enabled by default)', async () => {
       const { hasDriveScope } = await import('./auth')
       vi.mocked(hasDriveScope).mockReturnValue(true)
-
-      saveSyncSettings({
-        enabled: true,
-        lastSyncedAt: null,
-        deviceId: 'test',
-      })
 
       expect(isSyncEnabled()).toBe(true)
     })
 
-    it('returns false when enabled but no drive scope', async () => {
+    it('returns false when no drive scope', async () => {
       const { hasDriveScope } = await import('./auth')
       vi.mocked(hasDriveScope).mockReturnValue(false)
 
-      saveSyncSettings({
-        enabled: true,
-        lastSyncedAt: null,
-        deviceId: 'test',
-      })
+      expect(isSyncEnabled()).toBe(false)
+    })
+
+    it('returns false when explicitly disabled', async () => {
+      const { hasDriveScope } = await import('./auth')
+      vi.mocked(hasDriveScope).mockReturnValue(true)
+
+      // User explicitly disabled sync
+      localStorage.setItem('yearbird:cloud-sync-disabled', 'true')
 
       expect(isSyncEnabled()).toBe(false)
     })
   })
 
   describe('getSyncStatus', () => {
-    it('returns disabled when sync is disabled', () => {
-      expect(getSyncStatus()).toBe('disabled')
-    })
-
-    it('returns needs-consent when enabled but no drive scope', async () => {
+    it('returns needs-consent when no drive scope', async () => {
       const { hasDriveScope } = await import('./auth')
       vi.mocked(hasDriveScope).mockReturnValue(false)
 
-      saveSyncSettings({
-        enabled: true,
-        lastSyncedAt: null,
-        deviceId: 'test',
-      })
-
       expect(getSyncStatus()).toBe('needs-consent')
+    })
+
+    it('returns disabled when explicitly disabled', async () => {
+      const { hasDriveScope } = await import('./auth')
+      vi.mocked(hasDriveScope).mockReturnValue(true)
+
+      // User explicitly disabled sync
+      localStorage.setItem('yearbird:cloud-sync-disabled', 'true')
+
+      expect(getSyncStatus()).toBe('disabled')
     })
   })
 
@@ -335,7 +330,7 @@ describe('syncManager', () => {
   })
 
   describe('disableSync', () => {
-    it('sets enabled to false and clears lastSyncedAt', () => {
+    it('sets explicitly disabled flag and clears lastSyncedAt', () => {
       saveSyncSettings({
         enabled: true,
         lastSyncedAt: 1234567890,
@@ -344,8 +339,10 @@ describe('syncManager', () => {
 
       disableSync()
 
+      // Check the explicitly disabled flag
+      expect(localStorage.getItem('yearbird:cloud-sync-disabled')).toBe('true')
+
       const settings = getSyncSettings()
-      expect(settings.enabled).toBe(false)
       expect(settings.lastSyncedAt).toBeNull()
       expect(settings.deviceId).toBe('test-device')
     })
@@ -607,7 +604,7 @@ describe('syncManager', () => {
       expect(result).toBe(false)
     })
 
-    it('enables sync and performs initial sync', async () => {
+    it('clears explicitly disabled flag and performs initial sync', async () => {
       const { hasDriveScope } = await import('./auth')
       const { checkDriveAccess, readCloudConfig, writeCloudConfig } = await import('./driveSync')
 
@@ -619,12 +616,15 @@ describe('syncManager', () => {
         data: { id: 'file-123', name: 'yearbird-config.json', mimeType: 'application/json' },
       })
 
+      // Simulate user had explicitly disabled sync
+      localStorage.setItem('yearbird:cloud-sync-disabled', 'true')
+
       const result = await enableSync()
 
       expect(result).toBe(true)
 
-      const settings = getSyncSettings()
-      expect(settings.enabled).toBe(true)
+      // The explicitly disabled flag should be cleared
+      expect(localStorage.getItem('yearbird:cloud-sync-disabled')).toBeNull()
     })
   })
 
@@ -1253,6 +1253,171 @@ describe('syncManager', () => {
 
       // Reset modules again to restore normal behavior
       vi.resetModules()
+    })
+  })
+
+  describe('isEmptyConfig', () => {
+    const baseConfig: CloudConfig = {
+      version: 1,
+      updatedAt: 1000,
+      deviceId: 'device-1',
+      filters: [],
+      disabledCalendars: [],
+      disabledBuiltInCategories: [],
+      customCategories: [],
+    }
+
+    it('returns true for completely empty config', () => {
+      expect(isEmptyConfig(baseConfig)).toBe(true)
+    })
+
+    it('returns false when config has filters', () => {
+      const config: CloudConfig = {
+        ...baseConfig,
+        filters: [{ id: '1', pattern: 'test', createdAt: 1000 }],
+      }
+      expect(isEmptyConfig(config)).toBe(false)
+    })
+
+    it('returns false when config has disabled calendars', () => {
+      const config: CloudConfig = {
+        ...baseConfig,
+        disabledCalendars: ['cal-1'],
+      }
+      expect(isEmptyConfig(config)).toBe(false)
+    })
+
+    it('returns false when config has disabled built-in categories', () => {
+      const config: CloudConfig = {
+        ...baseConfig,
+        disabledBuiltInCategories: ['work'],
+      }
+      expect(isEmptyConfig(config)).toBe(false)
+    })
+
+    it('returns false when config has custom categories', () => {
+      const config: CloudConfig = {
+        ...baseConfig,
+        customCategories: [
+          {
+            id: 'custom-1' as `custom-${string}`,
+            label: 'Test',
+            color: '#ff0000',
+            keywords: ['test'],
+            matchMode: 'any',
+            createdAt: 1000,
+            updatedAt: 1000,
+          },
+        ],
+      }
+      expect(isEmptyConfig(config)).toBe(false)
+    })
+  })
+
+  describe('performSync - new device behavior', () => {
+    it('adopts remote config entirely when local is empty (new device scenario)', async () => {
+      const { hasDriveScope } = await import('./auth')
+      const { checkDriveAccess, readCloudConfig, writeCloudConfig } = await import('./driveSync')
+      const { getFilters } = await import('./filters')
+      const { getDisabledCalendars } = await import('./calendarVisibility')
+      const { getDisabledBuiltInCategories } = await import('./builtInCategories')
+      const { getCustomCategories } = await import('./customCategories')
+
+      vi.mocked(hasDriveScope).mockReturnValue(true)
+      vi.mocked(checkDriveAccess).mockResolvedValue(true)
+
+      // Local is empty (new device with no settings)
+      vi.mocked(getFilters).mockReturnValue([])
+      vi.mocked(getDisabledCalendars).mockReturnValue([])
+      vi.mocked(getDisabledBuiltInCategories).mockReturnValue([])
+      vi.mocked(getCustomCategories).mockReturnValue([])
+
+      // Remote has existing settings from another device
+      const remoteConfig: CloudConfig = {
+        version: 1,
+        updatedAt: Date.now() - 86400000, // 1 day ago
+        deviceId: 'macbook-device',
+        filters: [{ id: 'filter-1', pattern: 'Rent Payment', createdAt: 1000 }],
+        disabledCalendars: ['work-calendar'],
+        disabledBuiltInCategories: ['holidays'],
+        customCategories: [],
+      }
+
+      vi.mocked(readCloudConfig).mockResolvedValue({ success: true, data: remoteConfig })
+
+      let writtenConfig: CloudConfig | null = null
+      vi.mocked(writeCloudConfig).mockImplementation(async (config) => {
+        writtenConfig = config
+        return {
+          success: true,
+          data: { id: 'file-123', name: 'yearbird-config.json', mimeType: 'application/json' },
+        }
+      })
+
+      saveSyncSettings({ enabled: true, lastSyncedAt: null, deviceId: 'tv-device' })
+
+      const result = await performSync()
+
+      expect(result.status).toBe('success')
+
+      // The written config should have the remote settings, not empty local settings
+      expect(writtenConfig).not.toBeNull()
+      expect(writtenConfig!.filters).toEqual(remoteConfig.filters)
+      expect(writtenConfig!.disabledCalendars).toEqual(remoteConfig.disabledCalendars)
+      expect(writtenConfig!.disabledBuiltInCategories).toEqual(remoteConfig.disabledBuiltInCategories)
+      // But should use the new device's ID
+      expect(writtenConfig!.deviceId).toBe('tv-device')
+    })
+
+    it('merges configs when local has data (not a new device)', async () => {
+      const { hasDriveScope } = await import('./auth')
+      const { checkDriveAccess, readCloudConfig, writeCloudConfig } = await import('./driveSync')
+      const { getFilters } = await import('./filters')
+      const { getDisabledCalendars } = await import('./calendarVisibility')
+      const { getDisabledBuiltInCategories } = await import('./builtInCategories')
+      const { getCustomCategories } = await import('./customCategories')
+
+      vi.mocked(hasDriveScope).mockReturnValue(true)
+      vi.mocked(checkDriveAccess).mockResolvedValue(true)
+
+      // Local has some settings
+      vi.mocked(getFilters).mockReturnValue([{ id: 'local-filter', pattern: 'Local', createdAt: 2000 }])
+      vi.mocked(getDisabledCalendars).mockReturnValue([])
+      vi.mocked(getDisabledBuiltInCategories).mockReturnValue([])
+      vi.mocked(getCustomCategories).mockReturnValue([])
+
+      // Remote has different settings
+      const remoteConfig: CloudConfig = {
+        version: 1,
+        updatedAt: Date.now() - 86400000, // 1 day ago (older)
+        deviceId: 'macbook-device',
+        filters: [{ id: 'remote-filter', pattern: 'Remote', createdAt: 1000 }],
+        disabledCalendars: [],
+        disabledBuiltInCategories: [],
+        customCategories: [],
+      }
+
+      vi.mocked(readCloudConfig).mockResolvedValue({ success: true, data: remoteConfig })
+
+      let writtenConfig: CloudConfig | null = null
+      vi.mocked(writeCloudConfig).mockImplementation(async (config) => {
+        writtenConfig = config
+        return {
+          success: true,
+          data: { id: 'file-123', name: 'yearbird-config.json', mimeType: 'application/json' },
+        }
+      })
+
+      saveSyncSettings({ enabled: true, lastSyncedAt: null, deviceId: 'tv-device' })
+
+      const result = await performSync()
+
+      expect(result.status).toBe('success')
+
+      // Since local has data, it should go through merge logic
+      // Local is newer (Date.now() > remote.updatedAt), so local filters should win
+      expect(writtenConfig).not.toBeNull()
+      expect(writtenConfig!.filters).toEqual([{ id: 'local-filter', pattern: 'Local', createdAt: 2000 }])
     })
   })
 })

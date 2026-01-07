@@ -30,6 +30,13 @@ const SYNC_SETTINGS_KEY = 'yearbird:cloud-sync-settings'
  */
 const SYNC_DEBOUNCE_MS = 2000
 
+/**
+ * Key to track if user has explicitly disabled sync.
+ * Cloud Sync is ON by default when the user has drive scope.
+ * This key is only set when user manually turns off sync.
+ */
+const SYNC_DISABLED_KEY = 'yearbird:cloud-sync-disabled'
+
 let syncDebounceTimer: number | null = null
 let isSyncing = false
 let isWriting = false
@@ -86,23 +93,37 @@ export function saveSyncSettings(settings: CloudSyncSettings): void {
 }
 
 /**
- * Check if cloud sync is enabled and ready
+ * Check if user has explicitly disabled cloud sync.
+ */
+export function isExplicitlyDisabled(): boolean {
+  try {
+    return localStorage.getItem(SYNC_DISABLED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Check if cloud sync is enabled and ready.
+ * Sync is ON by default when the user has drive scope,
+ * unless they have explicitly disabled it.
  */
 export function isSyncEnabled(): boolean {
-  const settings = getSyncSettings()
-  return settings.enabled && hasDriveScope()
+  // Sync is enabled by default when user has drive scope
+  // Only disabled if user explicitly turned it off
+  return hasDriveScope() && !isExplicitlyDisabled()
 }
 
 /**
  * Get current sync status
  */
 export function getSyncStatus(): SyncStatus {
-  const settings = getSyncSettings()
-
-  if (!settings.enabled) {
+  // Check if user explicitly disabled sync
+  if (isExplicitlyDisabled()) {
     return 'disabled'
   }
 
+  // Check if we have drive scope (needed for sync)
   if (!hasDriveScope()) {
     return 'needs-consent'
   }
@@ -134,6 +155,19 @@ export function getLastSyncError(): string | null {
  */
 export function clearSyncError(): void {
   lastSyncError = null
+}
+
+/**
+ * Check if a CloudConfig represents an "empty" state (no user settings).
+ * Used to determine if we should prefer remote config over local defaults.
+ */
+export function isEmptyConfig(config: CloudConfig): boolean {
+  return (
+    config.filters.length === 0 &&
+    config.disabledCalendars.length === 0 &&
+    config.disabledBuiltInCategories.length === 0 &&
+    config.customCategories.length === 0
+  )
 }
 
 /**
@@ -303,8 +337,18 @@ export async function performSync(): Promise<SyncResult> {
     let configToWrite: CloudConfig
 
     if (remoteResult.data) {
-      // Merge local and remote
-      configToWrite = mergeConfigs(localConfig, remoteResult.data)
+      // If local is empty (new device), adopt remote settings entirely
+      // This prevents a new device from wiping existing cloud settings
+      if (isEmptyConfig(localConfig)) {
+        configToWrite = {
+          ...remoteResult.data,
+          updatedAt: Date.now(),
+          deviceId: getSyncSettings().deviceId,
+        }
+      } else {
+        // Both have data - merge with last-write-wins
+        configToWrite = mergeConfigs(localConfig, remoteResult.data)
+      }
     } else {
       // No remote config - use local as initial upload
       configToWrite = localConfig
@@ -331,18 +375,20 @@ export async function performSync(): Promise<SyncResult> {
 
 /**
  * Enable cloud sync.
- * This should be called after the user grants Drive scope.
+ * Clears the "explicitly disabled" flag and performs initial sync.
+ * Note: Sync is ON by default when user has drive scope.
  */
 export async function enableSync(): Promise<boolean> {
   if (!hasDriveScope()) {
     return false
   }
 
-  const settings = getSyncSettings()
-  saveSyncSettings({
-    ...settings,
-    enabled: true,
-  })
+  // Clear the explicitly disabled flag
+  try {
+    localStorage.removeItem(SYNC_DISABLED_KEY)
+  } catch {
+    // Ignore storage errors
+  }
 
   // Perform initial sync
   const result = await performSync()
@@ -351,13 +397,19 @@ export async function enableSync(): Promise<boolean> {
 
 /**
  * Disable cloud sync.
+ * Sets the "explicitly disabled" flag to opt-out of sync.
  * Keeps local data but stops syncing to Drive.
  */
 export function disableSync(): void {
+  try {
+    localStorage.setItem(SYNC_DISABLED_KEY, 'true')
+  } catch {
+    // Ignore storage errors
+  }
+
   const settings = getSyncSettings()
   saveSyncSettings({
     ...settings,
-    enabled: false,
     lastSyncedAt: null,
   })
 

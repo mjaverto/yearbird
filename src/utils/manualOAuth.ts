@@ -21,6 +21,7 @@ const OAUTH_STATE_KEY = 'yearbird:oauthState'
 export interface TokenData {
   accessToken: string
   expiresIn: number
+  scope?: string
 }
 
 export interface OAuthError {
@@ -122,6 +123,7 @@ export function extractTokenFromHash(): TokenData | null {
   const accessToken = params.get('access_token')
   const expiresInRaw = params.get('expires_in')
   const returnedState = params.get('state')
+  const scope = params.get('scope')
 
   if (!accessToken || !expiresInRaw) {
     return null
@@ -140,7 +142,7 @@ export function extractTokenFromHash(): TokenData | null {
     return null
   }
 
-  return { accessToken, expiresIn }
+  return { accessToken, expiresIn, scope: scope ?? undefined }
 }
 
 /**

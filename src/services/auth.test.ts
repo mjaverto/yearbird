@@ -57,6 +57,46 @@ describe('auth service', () => {
     expect(auth.getStoredAuth()).toEqual({ accessToken: 'token', expiresAt })
   })
 
+  it('stores granted scopes when provided', async () => {
+    const auth = await loadAuth()
+    const testScopes = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata'
+    auth.storeAuth('token', 120, testScopes)
+
+    expect(auth.getGrantedScopes()).toBe(testScopes)
+    expect(localStorage.getItem('yearbird:grantedScopes')).toBe(testScopes)
+  })
+
+  it('does not store scopes when not provided', async () => {
+    const auth = await loadAuth()
+    auth.storeAuth('token', 120)
+
+    expect(auth.getGrantedScopes()).toBeNull()
+    expect(localStorage.getItem('yearbird:grantedScopes')).toBeNull()
+  })
+
+  it('hasDriveScope returns true when drive.appdata scope is granted', async () => {
+    const auth = await loadAuth()
+    const testScopes = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata'
+    auth.storeAuth('token', 120, testScopes)
+
+    expect(auth.hasDriveScope()).toBe(true)
+  })
+
+  it('hasDriveScope returns false when only calendar scope is granted', async () => {
+    const auth = await loadAuth()
+    const testScopes = 'https://www.googleapis.com/auth/calendar.readonly'
+    auth.storeAuth('token', 120, testScopes)
+
+    expect(auth.hasDriveScope()).toBe(false)
+  })
+
+  it('hasDriveScope returns false when no scopes are stored', async () => {
+    const auth = await loadAuth()
+    auth.storeAuth('token', 120)
+
+    expect(auth.hasDriveScope()).toBe(false)
+  })
+
   it('clears expired tokens', async () => {
     const auth = await loadAuth()
     const expiresAt = Date.now() - 1000
@@ -144,16 +184,18 @@ describe('auth service', () => {
     expect(localStorage.getItem('yearbird:filters')).toBe(JSON.stringify(['personal']))
   })
 
-  it('clears stored auth explicitly', async () => {
+  it('clears stored auth explicitly including scopes', async () => {
     const auth = await loadAuth()
 
     localStorage.setItem('yearbird:accessToken', 'token')
     localStorage.setItem('yearbird:expiresAt', String(Date.now() + 60_000))
+    localStorage.setItem('yearbird:grantedScopes', 'https://www.googleapis.com/auth/calendar.readonly')
     localStorage.setItem('yearbird:events:2025', JSON.stringify({ timestamp: Date.now(), events: [] }))
 
     auth.clearStoredAuth()
 
     expect(localStorage.getItem('yearbird:accessToken')).toBeNull()
+    expect(localStorage.getItem('yearbird:grantedScopes')).toBeNull()
     expect(localStorage.getItem('yearbird:events:2025')).toBeNull()
   })
 })

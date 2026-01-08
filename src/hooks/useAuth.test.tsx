@@ -151,7 +151,7 @@ describe('useAuth', () => {
     await waitFor(() => expect(screen.getByTestId('notice').textContent).toBe('Missing Google client ID. Check .env.local.'))
   })
 
-  it('stores auth on success', async () => {
+  it('stores auth on success with scope', async () => {
     let tokenCallback: ((response: google.accounts.oauth2.TokenResponse) => void) | undefined
     vi.mocked(getStoredAuth).mockReturnValue(null)
     vi.mocked(initializeAuth).mockImplementation((callback) => {
@@ -164,11 +164,12 @@ describe('useAuth', () => {
 
     await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
 
+    const testScope = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata'
     act(() => {
-      tokenCallback?.({ access_token: 'token', expires_in: 120 } as google.accounts.oauth2.TokenResponse)
+      tokenCallback?.({ access_token: 'token', expires_in: 120, scope: testScope } as google.accounts.oauth2.TokenResponse)
     })
 
-    await waitFor(() => expect(storeAuth).toHaveBeenCalled())
+    await waitFor(() => expect(storeAuth).toHaveBeenCalledWith('token', 120, testScope))
     expect(clearSignInPopup).toHaveBeenCalled()
     expect(screen.getByTestId('auth').textContent).toBe('true')
   })

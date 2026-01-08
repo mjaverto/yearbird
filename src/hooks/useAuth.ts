@@ -78,7 +78,7 @@ const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
   // Check for OAuth token in URL hash (redirect flow callback)
   const tokenData = extractTokenFromHash()
   if (tokenData) {
-    const expiresAt = storeAuth(tokenData.accessToken, tokenData.expiresIn)
+    const expiresAt = storeAuth(tokenData.accessToken, tokenData.expiresIn, tokenData.scope)
     clearHashFromUrl()
     return {
       authState: {
@@ -148,7 +148,7 @@ export function useAuth() {
         return
       }
 
-      const expiresAt = storeAuth(response.access_token, response.expires_in)
+      const expiresAt = storeAuth(response.access_token, response.expires_in, response.scope)
       clearSignInPopup()
       setAuthState({
         isAuthenticated: true,

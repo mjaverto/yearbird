@@ -130,6 +130,17 @@ describe('manualOAuth', () => {
       expect(result).toEqual({
         accessToken: 'test-token-123',
         expiresIn: 3600,
+        scope: undefined,
+      })
+    })
+
+    it('extracts scope from hash when present', () => {
+      window.location.hash = '#access_token=test-token&expires_in=3600&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.readonly%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.appdata'
+      const result = extractTokenFromHash()
+      expect(result).toEqual({
+        accessToken: 'test-token',
+        expiresIn: 3600,
+        scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
       })
     })
 
@@ -164,6 +175,7 @@ describe('manualOAuth', () => {
       expect(result).toEqual({
         accessToken: 'test-token',
         expiresIn: 3600,
+        scope: undefined,
       })
       // State should be consumed (removed from storage)
       expect(mockSessionStorage['yearbird:oauthState']).toBeUndefined()
@@ -184,6 +196,7 @@ describe('manualOAuth', () => {
       expect(result).toEqual({
         accessToken: 'test-token',
         expiresIn: 3600,
+        scope: undefined,
       })
     })
 
@@ -195,6 +208,7 @@ describe('manualOAuth', () => {
       expect(result).toEqual({
         accessToken: 'test-token',
         expiresIn: 3600,
+        scope: undefined,
       })
     })
   })

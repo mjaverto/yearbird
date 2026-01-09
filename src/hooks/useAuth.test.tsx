@@ -12,6 +12,21 @@ vi.mock('../services/auth', () => ({
   signIn: vi.fn(),
   signOut: vi.fn(),
   storeAuth: vi.fn(),
+  CLIENT_ID: 'test-client-id',
+  SCOPES: 'test-scope-1 test-scope-2',
+}))
+
+vi.mock('../utils/tvDetection', () => ({
+  getTvModePreference: vi.fn(),
+  isTVBrowser: vi.fn(),
+  setTvModePreference: vi.fn(),
+}))
+
+vi.mock('../utils/manualOAuth', () => ({
+  buildOAuthRedirectUrl: vi.fn(),
+  clearHashFromUrl: vi.fn(),
+  extractErrorFromHash: vi.fn(),
+  extractTokenFromHash: vi.fn(),
 }))
 
 import {
@@ -26,8 +41,32 @@ import {
   storeAuth,
 } from '../services/auth'
 
+import {
+  getTvModePreference,
+  isTVBrowser,
+  setTvModePreference,
+} from '../utils/tvDetection'
+
+import {
+  buildOAuthRedirectUrl,
+  clearHashFromUrl,
+  extractErrorFromHash,
+  extractTokenFromHash,
+} from '../utils/manualOAuth'
+
 function AuthProbe() {
-  const { isAuthenticated, isReady, isSigningIn, authNotice, signIn, signOut } = useAuth()
+  const {
+    isAuthenticated,
+    isReady,
+    isSigningIn,
+    authNotice,
+    signIn,
+    signOut,
+    useTvMode,
+    isGisUnavailable,
+    tvSignIn,
+    toggleTvMode,
+  } = useAuth()
 
   return (
     <div>
@@ -35,8 +74,13 @@ function AuthProbe() {
       <span data-testid="ready">{String(isReady)}</span>
       <span data-testid="signing">{String(isSigningIn)}</span>
       <span data-testid="notice">{authNotice ?? ''}</span>
+      <span data-testid="tvMode">{String(useTvMode)}</span>
+      <span data-testid="gisUnavailable">{String(isGisUnavailable)}</span>
       <button onClick={signIn}>Sign in</button>
       <button onClick={signOut}>Sign out</button>
+      <button onClick={tvSignIn}>TV Sign in</button>
+      <button onClick={() => toggleTvMode(true)}>Enable TV Mode</button>
+      <button onClick={() => toggleTvMode(false)}>Disable TV Mode</button>
     </div>
   )
 }
@@ -47,6 +91,12 @@ describe('useAuth', () => {
     vi.mocked(hasClientId).mockReturnValue(true)
     vi.mocked(hasOpenSignInPopup).mockReturnValue(false)
     vi.mocked(signInService).mockReturnValue('opened')
+    // TV detection mocks - default to false/disabled
+    vi.mocked(getTvModePreference).mockReturnValue(false)
+    vi.mocked(isTVBrowser).mockReturnValue(false)
+    // Manual OAuth mocks - default to no hash data
+    vi.mocked(extractErrorFromHash).mockReturnValue(null)
+    vi.mocked(extractTokenFromHash).mockReturnValue(null)
   })
 
   afterEach(() => {
@@ -207,6 +257,189 @@ describe('useAuth', () => {
 
     expect(screen.getByTestId('notice').textContent).toBe('Session expired. Sign in again.')
     expect(clearStoredAuth).toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
+  it('does nothing when signIn called before ready', async () => {
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(false)
+
+    render(<AuthProbe />)
+
+    // Not ready yet
+    expect(screen.getByTestId('ready').textContent).toBe('false')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    // signIn should not be called when not ready
+    expect(signInService).not.toHaveBeenCalled()
+    expect(screen.getByTestId('signing').textContent).toBe('false')
+  })
+
+  it('sets isGisUnavailable when signIn returns unavailable', async () => {
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(true)
+    vi.mocked(signInService).mockReturnValue('unavailable')
+
+    render(<AuthProbe />)
+
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(screen.getByTestId('gisUnavailable').textContent).toBe('true')
+    expect(screen.getByTestId('notice').textContent).toBe('Google sign-in unavailable. Refresh to try again.')
+    expect(screen.getByTestId('signing').textContent).toBe('false')
+  })
+
+  it('redirects to OAuth URL when tvSignIn is called', async () => {
+    const mockLocation = { href: '', origin: 'https://example.com', pathname: '/app' }
+    const originalLocation = window.location
+    Object.defineProperty(window, 'location', { value: mockLocation, writable: true })
+
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(true)
+    vi.mocked(buildOAuthRedirectUrl).mockReturnValue('https://accounts.google.com/oauth?test=1')
+
+    render(<AuthProbe />)
+
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'TV Sign in' }))
+
+    expect(buildOAuthRedirectUrl).toHaveBeenCalledWith(
+      'test-client-id',
+      'https://example.com/app',
+      'test-scope-1 test-scope-2'
+    )
+    expect(mockLocation.href).toBe('https://accounts.google.com/oauth?test=1')
+
+    Object.defineProperty(window, 'location', { value: originalLocation, writable: true })
+  })
+
+  it('toggles TV mode on and persists preference', async () => {
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(true)
+
+    render(<AuthProbe />)
+
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
+
+    expect(screen.getByTestId('tvMode').textContent).toBe('false')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable TV Mode' }))
+
+    expect(screen.getByTestId('tvMode').textContent).toBe('true')
+    expect(setTvModePreference).toHaveBeenCalledWith(true)
+  })
+
+  it('toggles TV mode off and persists preference', async () => {
+    vi.mocked(getTvModePreference).mockReturnValue(true)
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(true)
+
+    render(<AuthProbe />)
+
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
+
+    expect(screen.getByTestId('tvMode').textContent).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disable TV Mode' }))
+
+    expect(screen.getByTestId('tvMode').textContent).toBe('false')
+    expect(setTvModePreference).toHaveBeenCalledWith(false)
+  })
+
+  it('clears notice and sets ready when enabling TV mode with GIS unavailable', async () => {
+    vi.useFakeTimers()
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(false)
+
+    render(<AuthProbe />)
+
+    // Trigger GIS unavailable by exhausting init attempts
+    act(() => {
+      vi.advanceTimersByTime(0)
+      vi.advanceTimersByTime(25 * 200)
+    })
+
+    expect(screen.getByTestId('gisUnavailable').textContent).toBe('true')
+    expect(screen.getByTestId('notice').textContent).toBe('Google sign-in unavailable. Refresh to try again.')
+
+    // Enable TV mode
+    fireEvent.click(screen.getByRole('button', { name: 'Enable TV Mode' }))
+
+    expect(screen.getByTestId('notice').textContent).toBe('')
+    expect(screen.getByTestId('ready').textContent).toBe('true')
+
+    vi.useRealTimers()
+  })
+
+  it('handles OAuth error in URL hash with access_denied', () => {
+    vi.mocked(extractErrorFromHash).mockReturnValue({ error: 'access_denied' })
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(true)
+
+    render(<AuthProbe />)
+
+    expect(screen.getByTestId('notice').textContent).toBe('Sign-in cancelled. Try again when ready.')
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(screen.getByTestId('ready').textContent).toBe('true')
+    expect(clearHashFromUrl).toHaveBeenCalled()
+  })
+
+  it('handles OAuth error in URL hash with custom error description', () => {
+    vi.mocked(extractErrorFromHash).mockReturnValue({
+      error: 'server_error',
+      errorDescription: 'Something went wrong',
+    })
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(true)
+
+    render(<AuthProbe />)
+
+    expect(screen.getByTestId('notice').textContent).toBe('Sign-in failed: Something went wrong')
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(clearHashFromUrl).toHaveBeenCalled()
+  })
+
+  it('handles OAuth token in URL hash and authenticates', () => {
+    const expiresAt = Date.now() + 3600_000
+    vi.mocked(extractTokenFromHash).mockReturnValue({
+      accessToken: 'hash-token',
+      expiresIn: 3600,
+      scope: 'test-scope',
+    })
+    vi.mocked(storeAuth).mockReturnValue(expiresAt)
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(true)
+
+    render(<AuthProbe />)
+
+    expect(storeAuth).toHaveBeenCalledWith('hash-token', 3600, 'test-scope')
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+    expect(screen.getByTestId('ready').textContent).toBe('true')
+    expect(screen.getByTestId('notice').textContent).toBe('')
+    expect(clearHashFromUrl).toHaveBeenCalled()
+  })
+
+  it('auto-enables TV mode on TV browsers when GIS fails', () => {
+    vi.useFakeTimers()
+    vi.mocked(getStoredAuth).mockReturnValue(null)
+    vi.mocked(initializeAuth).mockReturnValue(false)
+    vi.mocked(isTVBrowser).mockReturnValue(true)
+
+    render(<AuthProbe />)
+
+    // Trigger GIS unavailable by exhausting init attempts
+    act(() => {
+      vi.advanceTimersByTime(0)
+      vi.advanceTimersByTime(25 * 200)
+    })
+
+    expect(screen.getByTestId('tvMode').textContent).toBe('true')
+    expect(setTvModePreference).toHaveBeenCalledWith(true)
 
     vi.useRealTimers()
   })

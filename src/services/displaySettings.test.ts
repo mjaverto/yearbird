@@ -171,5 +171,50 @@ describe('displaySettings', () => {
       expect(getShowTimedEvents()).toBe(false)
       expect(getMatchDescription()).toBe(false)
     })
+
+    it('getShowTimedEvents returns false when localStorage access throws', () => {
+      // Simulate an environment where accessing localStorage throws
+      vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+        throw new Error('localStorage is not available')
+      })
+
+      expect(getShowTimedEvents()).toBe(false)
+
+      vi.restoreAllMocks()
+    })
+
+    it('setShowTimedEvents does nothing when localStorage access throws', () => {
+      vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+        throw new Error('localStorage is not available')
+      })
+
+      // Should not throw
+      expect(() => setShowTimedEvents(true)).not.toThrow()
+      expect(() => setShowTimedEvents(false)).not.toThrow()
+
+      vi.restoreAllMocks()
+    })
+
+    it('getMatchDescription returns false when localStorage access throws', () => {
+      vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+        throw new Error('localStorage is not available')
+      })
+
+      expect(getMatchDescription()).toBe(false)
+
+      vi.restoreAllMocks()
+    })
+
+    it('setMatchDescription does nothing when localStorage access throws', () => {
+      vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+        throw new Error('localStorage is not available')
+      })
+
+      // Should not throw
+      expect(() => setMatchDescription(true)).not.toThrow()
+      expect(() => setMatchDescription(false)).not.toThrow()
+
+      vi.restoreAllMocks()
+    })
   })
 })

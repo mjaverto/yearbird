@@ -146,6 +146,30 @@ describe('categorizeEvent', () => {
     expect(matchList.map((c) => c.label)).toEqual(['Apple', 'Mango', 'Zebra'])
   })
 
+  it('does not match categories with empty keywords', () => {
+    const emptyKeywords = createCategory('custom-1', 'Empty', [])
+    const matchList = getCategoryMatchList([emptyKeywords])
+
+    expect(categorizeEvent('anything', matchList)).toEqual({
+      category: 'uncategorized',
+      color: '#9CA3AF',
+    })
+  })
+
+  it('uses default match mode when matchMode is undefined', () => {
+    // Directly construct a CategoryConfig without matchMode to test null coalescing
+    const categoryWithoutMatchMode = {
+      category: 'test',
+      color: '#FF0000',
+      keywords: ['test'],
+      label: 'Test',
+      // matchMode intentionally omitted
+    }
+
+    const result = categorizeEvent('this is a test', [categoryWithoutMatchMode])
+    expect(result.category).toBe('test')
+  })
+
   describe('description matching', () => {
     it('does not match description when matchDescription is false', () => {
       const matchList = getCategoryMatchList(defaultCategories)

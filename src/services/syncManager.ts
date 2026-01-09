@@ -8,19 +8,20 @@
  * - Drive unavailable: Graceful degradation, user notified
  */
 
-import type { CustomCategoryId } from '../types/calendar'
 import type {
   CloudConfig,
-  CloudCustomCategory,
+  CloudConfigV1,
+  CloudConfigV2,
+  CloudCategory,
   CloudSyncSettings,
   SyncStatus,
 } from '../types/cloudConfig'
+import { DEFAULT_CATEGORIES } from '../config/categories'
 import { hasDriveScope } from './auth'
-import { readCloudConfig, writeCloudConfig, checkDriveAccess } from './driveSync'
+import { readCloudConfig, writeCloudConfig, checkDriveAccess, deleteCloudConfig } from './driveSync'
 import { getFilters } from './filters'
 import { getDisabledCalendars } from './calendarVisibility'
-import { getDisabledBuiltInCategories } from './builtInCategories'
-import { getCustomCategories } from './customCategories'
+import { getCategories } from './categories'
 
 const SYNC_SETTINGS_KEY = 'yearbird:cloud-sync-settings'
 /**
@@ -162,68 +163,162 @@ export function clearSyncError(): void {
  * Used to determine if we should prefer remote config over local defaults.
  */
 export function isEmptyConfig(config: CloudConfig): boolean {
-  return (
-    config.filters.length === 0 &&
-    config.disabledCalendars.length === 0 &&
-    config.disabledBuiltInCategories.length === 0 &&
-    config.customCategories.length === 0
-  )
+  if (config.version === 2) {
+    // v2: Check if only default categories exist (no customization)
+    const hasOnlyDefaults = config.categories.every((cat) => cat.isDefault === true)
+    const hasAllDefaults = DEFAULT_CATEGORIES.every((def) =>
+      config.categories.some((cat) => cat.id === def.id)
+    )
+    return (
+      config.filters.length === 0 &&
+      config.disabledCalendars.length === 0 &&
+      hasOnlyDefaults &&
+      hasAllDefaults &&
+      config.categories.length === DEFAULT_CATEGORIES.length
+    )
+  } else {
+    // v1: Legacy check
+    return (
+      config.filters.length === 0 &&
+      config.disabledCalendars.length === 0 &&
+      config.disabledBuiltInCategories.length === 0 &&
+      config.customCategories.length === 0
+    )
+  }
 }
 
 /**
- * Build a CloudConfig from current localStorage state
+ * Build a CloudConfig v2 from current localStorage state
  */
-export function buildCloudConfigFromLocal(): CloudConfig {
+export function buildCloudConfigFromLocal(): CloudConfigV2 {
   const settings = getSyncSettings()
+  const categories = getCategories()
+
+  // Convert Category[] to CloudCategory[]
+  const cloudCategories: CloudCategory[] = categories.map((cat) => ({
+    id: cat.id,
+    label: cat.label,
+    color: cat.color,
+    keywords: cat.keywords,
+    matchMode: cat.matchMode,
+    createdAt: cat.createdAt,
+    updatedAt: cat.updatedAt,
+    isDefault: cat.isDefault,
+  }))
 
   return {
-    version: 1,
+    version: 2,
     updatedAt: Date.now(),
     deviceId: settings.deviceId,
     filters: getFilters(),
     disabledCalendars: getDisabledCalendars(),
-    disabledBuiltInCategories: getDisabledBuiltInCategories(),
-    customCategories: getCustomCategories() as CloudCustomCategory[],
+    categories: cloudCategories,
   }
+}
+
+/**
+ * Migrate a v1 config to v2 format.
+ * Converts disabledBuiltInCategories + customCategories → unified categories array.
+ */
+export function migrateV1ToV2(config: CloudConfigV1): CloudConfigV2 {
+  const now = Date.now()
+
+  // Build unified categories from defaults (minus disabled) + custom
+  const disabledSet = new Set(config.disabledBuiltInCategories)
+
+  const categories: CloudCategory[] = []
+
+  // Add non-disabled default categories
+  for (const def of DEFAULT_CATEGORIES) {
+    if (!disabledSet.has(def.id)) {
+      categories.push({
+        id: def.id,
+        label: def.label,
+        color: def.color,
+        keywords: def.keywords,
+        matchMode: def.matchMode,
+        createdAt: now,
+        updatedAt: now,
+        isDefault: true,
+      })
+    }
+  }
+
+  // Add custom categories
+  for (const custom of config.customCategories) {
+    categories.push({
+      id: custom.id,
+      label: custom.label,
+      color: custom.color,
+      keywords: custom.keywords,
+      matchMode: custom.matchMode,
+      createdAt: custom.createdAt,
+      updatedAt: custom.updatedAt,
+      isDefault: false,
+    })
+  }
+
+  return {
+    version: 2,
+    updatedAt: config.updatedAt,
+    deviceId: config.deviceId,
+    filters: config.filters,
+    disabledCalendars: config.disabledCalendars,
+    categories,
+  }
+}
+
+/**
+ * Ensure config is v2 format, migrating if necessary.
+ */
+function ensureV2(config: CloudConfig): CloudConfigV2 {
+  if (config.version === 2) {
+    return config
+  }
+  return migrateV1ToV2(config)
 }
 
 /**
  * Merge local and remote configs.
  *
  * Strategy: Last-write-wins based on updatedAt timestamp.
- * - Arrays (filters, disabledCalendars, disabledBuiltInCategories) use whole-array last-write-wins
+ * - Arrays (filters, disabledCalendars) use whole-array last-write-wins
  *   to properly handle deletions (union would resurrect deleted items)
- * - Custom categories merge by ID with per-item updatedAt for granular conflict resolution
+ * - Categories merge by ID with per-item updatedAt for granular conflict resolution
+ *
+ * Both configs are migrated to v2 before merging if needed.
  */
 export function mergeConfigs(
   local: CloudConfig,
   remote: CloudConfig
-): CloudConfig {
+): CloudConfigV2 {
   const settings = getSyncSettings()
-  const remoteIsNewer = remote.updatedAt >= local.updatedAt
+
+  // Ensure both are v2 format
+  const localV2 = ensureV2(local)
+  const remoteV2 = ensureV2(remote)
+
+  const remoteIsNewer = remoteV2.updatedAt >= localV2.updatedAt
 
   // Filters - last-write-wins (whole array)
-  // Using union would resurrect deleted filters, so we take the newer array
-  const filters = remoteIsNewer ? remote.filters : local.filters
+  const filters = remoteIsNewer ? remoteV2.filters : localV2.filters
 
   // Disabled calendars - last-write-wins (whole array)
-  // Union would prevent re-enabling calendars across devices
   const disabledCalendars = remoteIsNewer
-    ? remote.disabledCalendars
-    : local.disabledCalendars
+    ? remoteV2.disabledCalendars
+    : localV2.disabledCalendars
 
-  // Disabled built-in categories - last-write-wins (whole array)
-  const disabledBuiltInCategories = remoteIsNewer
-    ? remote.disabledBuiltInCategories
-    : local.disabledBuiltInCategories
+  // Categories - merge by ID with per-item updatedAt
+  // This allows granular updates while still supporting deletions
+  const categoryMap = new Map<string, CloudCategory>()
 
-  // Custom categories - merge by ID with per-item updatedAt
-  // This allows granular updates while still supporting deletions via updatedAt
-  const categoryMap = new Map<CustomCategoryId, CloudCustomCategory>()
-  for (const cat of remote.customCategories) {
+  // Start with remote categories
+  for (const cat of remoteV2.categories) {
     categoryMap.set(cat.id, cat)
   }
-  for (const cat of local.customCategories) {
+
+  // Merge local categories (newer wins per category)
+  for (const cat of localV2.categories) {
     const existing = categoryMap.get(cat.id)
     if (!existing || cat.updatedAt > existing.updatedAt) {
       categoryMap.set(cat.id, cat)
@@ -231,52 +326,45 @@ export function mergeConfigs(
   }
 
   return {
-    version: 1,
+    version: 2,
     updatedAt: Date.now(),
     deviceId: settings.deviceId,
     filters,
     disabledCalendars,
-    disabledBuiltInCategories,
-    customCategories: Array.from(categoryMap.values()),
+    categories: Array.from(categoryMap.values()),
   }
 }
 
 /**
  * Apply cloud config to localStorage.
- * This writes the config data to the respective localStorage keys.
+ * Migrates v1 configs to v2 format before applying.
+ * Writes to the unified categories storage key.
  */
 export function applyCloudConfigToLocal(config: CloudConfig): void {
   try {
+    // Ensure v2 format
+    const v2Config = ensureV2(config)
+
     // Write filters
-    if (config.filters.length > 0) {
-      localStorage.setItem('yearbird:filters', JSON.stringify(config.filters))
+    if (v2Config.filters.length > 0) {
+      localStorage.setItem('yearbird:filters', JSON.stringify(v2Config.filters))
     } else {
       localStorage.removeItem('yearbird:filters')
     }
 
     // Write disabled calendars
-    if (config.disabledCalendars.length > 0) {
-      localStorage.setItem('yearbird:disabled-calendars', JSON.stringify(config.disabledCalendars))
+    if (v2Config.disabledCalendars.length > 0) {
+      localStorage.setItem('yearbird:disabled-calendars', JSON.stringify(v2Config.disabledCalendars))
     } else {
       localStorage.removeItem('yearbird:disabled-calendars')
     }
 
-    // Write disabled built-in categories
-    if (config.disabledBuiltInCategories.length > 0) {
-      localStorage.setItem('yearbird:disabled-built-in-categories', JSON.stringify(config.disabledBuiltInCategories))
-    } else {
-      localStorage.removeItem('yearbird:disabled-built-in-categories')
-    }
+    // Write unified categories (v2 format)
+    localStorage.setItem('yearbird:categories', JSON.stringify(v2Config.categories))
 
-    // Write custom categories
-    if (config.customCategories.length > 0) {
-      localStorage.setItem('yearbird:custom-categories', JSON.stringify({
-        version: 1,
-        categories: config.customCategories,
-      }))
-    } else {
-      localStorage.removeItem('yearbird:custom-categories')
-    }
+    // Clean up legacy keys (they will be migrated on next read if needed)
+    localStorage.removeItem('yearbird:disabled-built-in-categories')
+    localStorage.removeItem('yearbird:custom-categories')
 
     // Update sync settings
     const settings = getSyncSettings()
@@ -414,6 +502,50 @@ export function disableSync(): void {
   })
 
   lastSyncError = null
+}
+
+export type DeleteCloudDataResult =
+  | { status: 'success' }
+  | { status: 'error'; message: string }
+
+/**
+ * Delete all cloud data from Google Drive.
+ * This removes the config file from appDataFolder.
+ * Local settings are preserved - only cloud copy is deleted.
+ * Useful for:
+ * - Users who want to delete their data from Google
+ * - Starting fresh if data gets corrupted
+ */
+export async function deleteCloudData(): Promise<DeleteCloudDataResult> {
+  // Check if we're online before attempting delete
+  if (!navigator.onLine) {
+    const message = 'Cannot delete cloud data while offline'
+    lastSyncError = message
+    return { status: 'error', message }
+  }
+
+  try {
+    const result = await deleteCloudConfig()
+    if (!result.success) {
+      const message = result.error?.message || 'Failed to delete cloud data'
+      lastSyncError = message
+      return { status: 'error', message }
+    }
+
+    // Reset sync settings but keep device ID
+    const settings = getSyncSettings()
+    saveSyncSettings({
+      ...settings,
+      lastSyncedAt: null,
+    })
+
+    lastSyncError = null
+    return { status: 'success' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete cloud data'
+    lastSyncError = message
+    return { status: 'error', message }
+  }
 }
 
 /**

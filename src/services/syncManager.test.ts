@@ -16,8 +16,11 @@ import {
   handleOnline,
   getLastSyncError,
   isEmptyConfig,
+  deleteCloudData,
+  migrateV1ToV2,
 } from './syncManager'
-import type { CloudConfig, CloudSyncSettings } from '../types/cloudConfig'
+import type { CloudConfigV1, CloudConfigV2, CloudSyncSettings } from '../types/cloudConfig'
+import { DEFAULT_CATEGORIES } from '../config/categories'
 
 // Mock auth module
 vi.mock('./auth', () => ({
@@ -29,6 +32,7 @@ vi.mock('./driveSync', () => ({
   readCloudConfig: vi.fn(),
   writeCloudConfig: vi.fn(),
   checkDriveAccess: vi.fn(),
+  deleteCloudConfig: vi.fn(),
 }))
 
 // Mock data service modules
@@ -40,12 +44,9 @@ vi.mock('./calendarVisibility', () => ({
   getDisabledCalendars: vi.fn(() => []),
 }))
 
-vi.mock('./builtInCategories', () => ({
-  getDisabledBuiltInCategories: vi.fn(() => []),
-}))
-
-vi.mock('./customCategories', () => ({
-  getCustomCategories: vi.fn(() => []),
+// Mock unified categories service
+vi.mock('./categories', () => ({
+  getCategories: vi.fn(() => []),
 }))
 
 describe('syncManager', () => {
@@ -162,26 +163,25 @@ describe('syncManager', () => {
   })
 
   describe('mergeConfigs', () => {
-    const baseConfig: CloudConfig = {
-      version: 1,
+    const baseConfigV2: CloudConfigV2 = {
+      version: 2,
       updatedAt: 1000,
       deviceId: 'device-1',
       filters: [],
       disabledCalendars: [],
-      disabledBuiltInCategories: [],
-      customCategories: [],
+      categories: [],
     }
 
     it('uses remote arrays when remote is newer', () => {
-      const local: CloudConfig = {
-        ...baseConfig,
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
         filters: [{ id: '1', pattern: 'local-filter', createdAt: 1000 }],
         disabledCalendars: ['cal-local'],
       }
 
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
         filters: [{ id: '2', pattern: 'remote-filter', createdAt: 2000 }],
         disabledCalendars: ['cal-remote'],
@@ -194,15 +194,15 @@ describe('syncManager', () => {
     })
 
     it('uses local arrays when local is newer', () => {
-      const local: CloudConfig = {
-        ...baseConfig,
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
         filters: [{ id: '1', pattern: 'local-filter', createdAt: 1000 }],
         disabledCalendars: ['cal-local'],
       }
 
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
         filters: [{ id: '2', pattern: 'remote-filter', createdAt: 500 }],
         disabledCalendars: ['cal-remote'],
@@ -214,13 +214,13 @@ describe('syncManager', () => {
       expect(merged.disabledCalendars).toEqual(local.disabledCalendars)
     })
 
-    it('merges custom categories by ID with updatedAt precedence', () => {
-      const local: CloudConfig = {
-        ...baseConfig,
+    it('merges categories by ID with updatedAt precedence', () => {
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
-        customCategories: [
+        categories: [
           {
-            id: 'cat-1' as `custom-${string}`,
+            id: 'cat-1',
             label: 'Local Category',
             color: '#ff0000',
             keywords: ['local'],
@@ -231,12 +231,12 @@ describe('syncManager', () => {
         ],
       }
 
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
-        customCategories: [
+        categories: [
           {
-            id: 'cat-1' as `custom-${string}`,
+            id: 'cat-1',
             label: 'Remote Category',
             color: '#00ff00',
             keywords: ['remote'],
@@ -249,21 +249,21 @@ describe('syncManager', () => {
 
       const merged = mergeConfigs(local, remote)
 
-      expect(merged.customCategories).toHaveLength(1)
-      expect(merged.customCategories[0].label).toBe('Local Category')
+      expect(merged.categories).toHaveLength(1)
+      expect(merged.categories[0].label).toBe('Local Category')
     })
 
     it('handles deletions correctly (no resurrection)', () => {
       // Local has deleted a filter (empty array)
-      const local: CloudConfig = {
-        ...baseConfig,
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
         filters: [],
       }
 
       // Remote still has the filter from before deletion
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
         filters: [{ id: '1', pattern: 'old-filter', createdAt: 500 }],
       }
@@ -277,14 +277,24 @@ describe('syncManager', () => {
 
   describe('applyCloudConfigToLocal', () => {
     it('writes config data to respective localStorage keys', () => {
-      const config: CloudConfig = {
-        version: 1,
+      const config: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now(),
         deviceId: 'test-device',
         filters: [{ id: '1', pattern: 'test', createdAt: 1000 }],
         disabledCalendars: ['cal-1'],
-        disabledBuiltInCategories: ['work'],
-        customCategories: [],
+        categories: [
+          {
+            id: 'work',
+            label: 'Work',
+            color: '#8B5CF6',
+            keywords: ['meeting'],
+            matchMode: 'any',
+            createdAt: 1000,
+            updatedAt: 1000,
+            isDefault: true,
+          },
+        ],
       }
 
       applyCloudConfigToLocal(config)
@@ -295,8 +305,13 @@ describe('syncManager', () => {
       const disabledCalendars = JSON.parse(localStorage.getItem('yearbird:disabled-calendars') || '[]')
       expect(disabledCalendars).toEqual(config.disabledCalendars)
 
-      const disabledCategories = JSON.parse(localStorage.getItem('yearbird:disabled-built-in-categories') || '[]')
-      expect(disabledCategories).toEqual(config.disabledBuiltInCategories)
+      // Should write unified categories
+      const categories = JSON.parse(localStorage.getItem('yearbird:categories') || '[]')
+      expect(categories).toEqual(config.categories)
+
+      // Legacy keys should be removed
+      expect(localStorage.getItem('yearbird:disabled-built-in-categories')).toBeNull()
+      expect(localStorage.getItem('yearbird:custom-categories')).toBeNull()
     })
 
     it('removes localStorage keys when arrays are empty', () => {
@@ -305,14 +320,13 @@ describe('syncManager', () => {
       localStorage.setItem('yearbird:disabled-calendars', JSON.stringify(['cal-1']))
 
       // Apply empty config
-      const config: CloudConfig = {
-        version: 1,
+      const config: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now(),
         deviceId: 'test-device',
         filters: [],
         disabledCalendars: [],
-        disabledBuiltInCategories: [],
-        customCategories: [],
+        categories: [],
       }
 
       applyCloudConfigToLocal(config)
@@ -355,16 +369,25 @@ describe('syncManager', () => {
   })
 
   describe('buildCloudConfigFromLocal', () => {
-    it('builds config from localStorage data services', async () => {
+    it('builds v2 config from localStorage data services', async () => {
       const { getFilters } = await import('./filters')
       const { getDisabledCalendars } = await import('./calendarVisibility')
-      const { getDisabledBuiltInCategories } = await import('./builtInCategories')
-      const { getCustomCategories } = await import('./customCategories')
+      const { getCategories } = await import('./categories')
 
       vi.mocked(getFilters).mockReturnValue([{ id: 'f1', pattern: 'test', createdAt: 1000 }])
       vi.mocked(getDisabledCalendars).mockReturnValue(['cal-1'])
-      vi.mocked(getDisabledBuiltInCategories).mockReturnValue(['work'])
-      vi.mocked(getCustomCategories).mockReturnValue([])
+      vi.mocked(getCategories).mockReturnValue([
+        {
+          id: 'work',
+          label: 'Work',
+          color: '#8B5CF6',
+          keywords: ['meeting'],
+          matchMode: 'any',
+          createdAt: 1000,
+          updatedAt: 1000,
+          isDefault: true,
+        },
+      ])
 
       saveSyncSettings({
         enabled: true,
@@ -374,11 +397,12 @@ describe('syncManager', () => {
 
       const config = buildCloudConfigFromLocal()
 
-      expect(config.version).toBe(1)
+      expect(config.version).toBe(2)
       expect(config.deviceId).toBe('my-device')
       expect(config.filters).toEqual([{ id: 'f1', pattern: 'test', createdAt: 1000 }])
       expect(config.disabledCalendars).toEqual(['cal-1'])
-      expect(config.disabledBuiltInCategories).toEqual(['work'])
+      expect(config.categories).toHaveLength(1)
+      expect(config.categories[0].id).toBe('work')
     })
   })
 
@@ -509,14 +533,13 @@ describe('syncManager', () => {
       vi.mocked(hasDriveScope).mockReturnValue(true)
       vi.mocked(checkDriveAccess).mockResolvedValue(true)
 
-      const remoteConfig: CloudConfig = {
-        version: 1,
+      const remoteConfig: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now() - 1000,
         deviceId: 'remote-device',
         filters: [{ id: 'remote-filter', pattern: 'remote', createdAt: 1000 }],
         disabledCalendars: ['remote-cal'],
-        disabledBuiltInCategories: [],
-        customCategories: [],
+        categories: [],
       }
 
       vi.mocked(readCloudConfig).mockResolvedValue({ success: true, data: remoteConfig })
@@ -807,18 +830,17 @@ describe('syncManager', () => {
     })
   })
 
-  describe('applyCloudConfigToLocal with custom categories', () => {
-    it('writes custom categories to localStorage', () => {
-      const config: CloudConfig = {
-        version: 1,
+  describe('applyCloudConfigToLocal with categories', () => {
+    it('writes categories to localStorage', () => {
+      const config: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now(),
         deviceId: 'test-device',
         filters: [],
         disabledCalendars: [],
-        disabledBuiltInCategories: [],
-        customCategories: [
+        categories: [
           {
-            id: 'custom-1' as `custom-${string}`,
+            id: 'custom-1',
             label: 'Test Category',
             color: '#ff0000',
             keywords: ['test'],
@@ -831,28 +853,60 @@ describe('syncManager', () => {
 
       applyCloudConfigToLocal(config)
 
-      const stored = JSON.parse(localStorage.getItem('yearbird:custom-categories') || '{}')
-      expect(stored.version).toBe(1)
-      expect(stored.categories).toHaveLength(1)
-      expect(stored.categories[0].label).toBe('Test Category')
+      const stored = JSON.parse(localStorage.getItem('yearbird:categories') || '[]')
+      expect(stored).toHaveLength(1)
+      expect(stored[0].label).toBe('Test Category')
     })
 
-    it('removes custom categories key when array is empty', () => {
-      localStorage.setItem('yearbird:custom-categories', JSON.stringify({ version: 1, categories: [{ id: 'old' }] }))
+    it('handles empty categories array', () => {
+      localStorage.setItem('yearbird:categories', JSON.stringify([{ id: 'old' }]))
 
-      const config: CloudConfig = {
+      const config: CloudConfigV2 = {
+        version: 2,
+        updatedAt: Date.now(),
+        deviceId: 'test-device',
+        filters: [],
+        disabledCalendars: [],
+        categories: [],
+      }
+
+      applyCloudConfigToLocal(config)
+
+      // Even empty categories should write an empty array
+      const stored = JSON.parse(localStorage.getItem('yearbird:categories') || '[]')
+      expect(stored).toEqual([])
+    })
+
+    it('migrates v1 to v2 when applying', () => {
+      const configV1: CloudConfigV1 = {
         version: 1,
         updatedAt: Date.now(),
         deviceId: 'test-device',
         filters: [],
         disabledCalendars: [],
-        disabledBuiltInCategories: [],
-        customCategories: [],
+        disabledBuiltInCategories: ['work'],
+        customCategories: [
+          {
+            id: 'custom-1',
+            label: 'Custom Cat',
+            color: '#ff0000',
+            keywords: ['custom'],
+            matchMode: 'any',
+            createdAt: 1000,
+            updatedAt: 1000,
+          },
+        ],
       }
 
-      applyCloudConfigToLocal(config)
+      applyCloudConfigToLocal(configV1)
 
-      expect(localStorage.getItem('yearbird:custom-categories')).toBeNull()
+      // Should write unified categories (defaults minus disabled + custom)
+      const stored = JSON.parse(localStorage.getItem('yearbird:categories') || '[]')
+      expect(stored.find((c: { id: string }) => c.id === 'custom-1')).toBeDefined()
+      // Work was disabled, so it shouldn't be in categories
+      expect(stored.find((c: { id: string }) => c.id === 'work')).toBeUndefined()
+      // Other defaults should be present
+      expect(stored.find((c: { id: string }) => c.id === 'birthdays')).toBeDefined()
     })
   })
 
@@ -989,23 +1043,22 @@ describe('syncManager', () => {
   })
 
   describe('mergeConfigs additional cases', () => {
-    const baseConfig: CloudConfig = {
-      version: 1,
+    const baseConfigV2: CloudConfigV2 = {
+      version: 2,
       updatedAt: 1000,
       deviceId: 'device-1',
       filters: [],
       disabledCalendars: [],
-      disabledBuiltInCategories: [],
-      customCategories: [],
+      categories: [],
     }
 
-    it('keeps remote custom category when remote is newer', () => {
-      const local: CloudConfig = {
-        ...baseConfig,
+    it('keeps remote category when remote is newer', () => {
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
-        customCategories: [
+        categories: [
           {
-            id: 'cat-1' as `custom-${string}`,
+            id: 'cat-1',
             label: 'Local',
             color: '#ff0000',
             keywords: ['local'],
@@ -1016,12 +1069,12 @@ describe('syncManager', () => {
         ],
       }
 
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
-        customCategories: [
+        categories: [
           {
-            id: 'cat-1' as `custom-${string}`,
+            id: 'cat-1',
             label: 'Remote',
             color: '#00ff00',
             keywords: ['remote'],
@@ -1034,16 +1087,16 @@ describe('syncManager', () => {
 
       const merged = mergeConfigs(local, remote)
 
-      expect(merged.customCategories[0].label).toBe('Remote')
+      expect(merged.categories[0].label).toBe('Remote')
     })
 
     it('combines categories from both sources', () => {
-      const local: CloudConfig = {
-        ...baseConfig,
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
-        customCategories: [
+        categories: [
           {
-            id: 'local-only' as `custom-${string}`,
+            id: 'local-only',
             label: 'Local Only',
             color: '#ff0000',
             keywords: ['local'],
@@ -1054,12 +1107,12 @@ describe('syncManager', () => {
         ],
       }
 
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
-        customCategories: [
+        categories: [
           {
-            id: 'remote-only' as `custom-${string}`,
+            id: 'remote-only',
             label: 'Remote Only',
             color: '#00ff00',
             keywords: ['remote'],
@@ -1072,45 +1125,82 @@ describe('syncManager', () => {
 
       const merged = mergeConfigs(local, remote)
 
-      expect(merged.customCategories).toHaveLength(2)
-      expect(merged.customCategories.map((c) => c.id)).toContain('local-only')
-      expect(merged.customCategories.map((c) => c.id)).toContain('remote-only')
+      expect(merged.categories).toHaveLength(2)
+      expect(merged.categories.map((c) => c.id)).toContain('local-only')
+      expect(merged.categories.map((c) => c.id)).toContain('remote-only')
     })
 
-    it('uses remote disabledBuiltInCategories when remote is newer', () => {
-      const local: CloudConfig = {
-        ...baseConfig,
+    it('uses remote disabledCalendars when remote is newer', () => {
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
-        disabledBuiltInCategories: ['work'],
+        disabledCalendars: ['cal-1'],
       }
 
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
-        disabledBuiltInCategories: ['birthdays', 'holidays'],
+        disabledCalendars: ['cal-2', 'cal-3'],
       }
 
       const merged = mergeConfigs(local, remote)
 
-      expect(merged.disabledBuiltInCategories).toEqual(['birthdays', 'holidays'])
+      expect(merged.disabledCalendars).toEqual(['cal-2', 'cal-3'])
     })
 
-    it('uses local disabledBuiltInCategories when local is newer', () => {
-      const local: CloudConfig = {
-        ...baseConfig,
+    it('uses local disabledCalendars when local is newer', () => {
+      const local: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 2000,
-        disabledBuiltInCategories: ['work'],
+        disabledCalendars: ['cal-1'],
       }
 
-      const remote: CloudConfig = {
-        ...baseConfig,
+      const remote: CloudConfigV2 = {
+        ...baseConfigV2,
         updatedAt: 1000,
-        disabledBuiltInCategories: ['birthdays', 'holidays'],
+        disabledCalendars: ['cal-2', 'cal-3'],
       }
 
       const merged = mergeConfigs(local, remote)
 
-      expect(merged.disabledBuiltInCategories).toEqual(['work'])
+      expect(merged.disabledCalendars).toEqual(['cal-1'])
+    })
+  })
+
+  describe('migrateV1ToV2', () => {
+    it('converts v1 config to v2 format', () => {
+      const v1Config: CloudConfigV1 = {
+        version: 1,
+        updatedAt: 1000,
+        deviceId: 'device-1',
+        filters: [{ id: 'f1', pattern: 'test', createdAt: 500 }],
+        disabledCalendars: ['cal-1'],
+        disabledBuiltInCategories: ['work'],
+        customCategories: [
+          {
+            id: 'custom-1',
+            label: 'Custom',
+            color: '#ff0000',
+            keywords: ['custom'],
+            matchMode: 'any',
+            createdAt: 800,
+            updatedAt: 900,
+          },
+        ],
+      }
+
+      const v2Config = migrateV1ToV2(v1Config)
+
+      expect(v2Config.version).toBe(2)
+      expect(v2Config.updatedAt).toBe(1000)
+      expect(v2Config.deviceId).toBe('device-1')
+      expect(v2Config.filters).toEqual(v1Config.filters)
+      expect(v2Config.disabledCalendars).toEqual(['cal-1'])
+
+      // Should have defaults minus disabled + custom
+      expect(v2Config.categories.find((c) => c.id === 'work')).toBeUndefined()
+      expect(v2Config.categories.find((c) => c.id === 'birthdays')).toBeDefined()
+      expect(v2Config.categories.find((c) => c.id === 'custom-1')).toBeDefined()
     })
   })
 
@@ -1257,60 +1347,100 @@ describe('syncManager', () => {
   })
 
   describe('isEmptyConfig', () => {
-    const baseConfig: CloudConfig = {
-      version: 1,
+    // Create a v2 config with all default categories
+    const defaultCategories = DEFAULT_CATEGORIES.map((def) => ({
+      id: def.id,
+      label: def.label,
+      color: def.color,
+      keywords: def.keywords,
+      matchMode: def.matchMode,
+      createdAt: 1000,
+      updatedAt: 1000,
+      isDefault: true,
+    }))
+
+    const baseConfigV2: CloudConfigV2 = {
+      version: 2,
       updatedAt: 1000,
       deviceId: 'device-1',
       filters: [],
       disabledCalendars: [],
-      disabledBuiltInCategories: [],
-      customCategories: [],
+      categories: defaultCategories,
     }
 
-    it('returns true for completely empty config', () => {
-      expect(isEmptyConfig(baseConfig)).toBe(true)
+    it('returns true for config with only default categories', () => {
+      expect(isEmptyConfig(baseConfigV2)).toBe(true)
     })
 
     it('returns false when config has filters', () => {
-      const config: CloudConfig = {
-        ...baseConfig,
+      const config: CloudConfigV2 = {
+        ...baseConfigV2,
         filters: [{ id: '1', pattern: 'test', createdAt: 1000 }],
       }
       expect(isEmptyConfig(config)).toBe(false)
     })
 
     it('returns false when config has disabled calendars', () => {
-      const config: CloudConfig = {
-        ...baseConfig,
+      const config: CloudConfigV2 = {
+        ...baseConfigV2,
         disabledCalendars: ['cal-1'],
       }
       expect(isEmptyConfig(config)).toBe(false)
     })
 
-    it('returns false when config has disabled built-in categories', () => {
-      const config: CloudConfig = {
-        ...baseConfig,
-        disabledBuiltInCategories: ['work'],
-      }
-      expect(isEmptyConfig(config)).toBe(false)
-    })
-
     it('returns false when config has custom categories', () => {
-      const config: CloudConfig = {
-        ...baseConfig,
-        customCategories: [
+      const config: CloudConfigV2 = {
+        ...baseConfigV2,
+        categories: [
+          ...defaultCategories,
           {
-            id: 'custom-1' as `custom-${string}`,
-            label: 'Test',
+            id: 'custom-1',
+            label: 'Custom',
             color: '#ff0000',
-            keywords: ['test'],
+            keywords: ['custom'],
             matchMode: 'any',
             createdAt: 1000,
             updatedAt: 1000,
+            isDefault: false,
           },
         ],
       }
       expect(isEmptyConfig(config)).toBe(false)
+    })
+
+    it('returns false when config is missing a default category', () => {
+      const config: CloudConfigV2 = {
+        ...baseConfigV2,
+        categories: defaultCategories.filter((c) => c.id !== 'work'),
+      }
+      expect(isEmptyConfig(config)).toBe(false)
+    })
+
+    // Test v1 format still works
+    it('handles v1 format - empty', () => {
+      const v1Config: CloudConfigV1 = {
+        version: 1,
+        updatedAt: 1000,
+        deviceId: 'device-1',
+        filters: [],
+        disabledCalendars: [],
+        disabledBuiltInCategories: [],
+        customCategories: [],
+      }
+      expect(isEmptyConfig(v1Config)).toBe(true)
+    })
+
+    it('handles v1 format - not empty', () => {
+      const v1Config: CloudConfigV1 = {
+        version: 1,
+        updatedAt: 1000,
+        deviceId: 'device-1',
+        filters: [],
+        disabledCalendars: [],
+        disabledBuiltInCategories: ['work'],
+        customCategories: [],
+      }
+      expect(isEmptyConfig(v1Config)).toBe(false)
     })
   })
 
@@ -1320,34 +1450,63 @@ describe('syncManager', () => {
       const { checkDriveAccess, readCloudConfig, writeCloudConfig } = await import('./driveSync')
       const { getFilters } = await import('./filters')
       const { getDisabledCalendars } = await import('./calendarVisibility')
-      const { getDisabledBuiltInCategories } = await import('./builtInCategories')
-      const { getCustomCategories } = await import('./customCategories')
+      const { getCategories } = await import('./categories')
 
       vi.mocked(hasDriveScope).mockReturnValue(true)
       vi.mocked(checkDriveAccess).mockResolvedValue(true)
 
-      // Local is empty (new device with no settings)
+      // Local has default categories (empty/new device state)
+      const localDefaults = DEFAULT_CATEGORIES.map((def) => ({
+        id: def.id,
+        label: def.label,
+        color: def.color,
+        keywords: def.keywords,
+        matchMode: def.matchMode,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        isDefault: true,
+      }))
+
       vi.mocked(getFilters).mockReturnValue([])
       vi.mocked(getDisabledCalendars).mockReturnValue([])
-      vi.mocked(getDisabledBuiltInCategories).mockReturnValue([])
-      vi.mocked(getCustomCategories).mockReturnValue([])
+      vi.mocked(getCategories).mockReturnValue(localDefaults)
 
-      // Remote has existing settings from another device
-      const remoteConfig: CloudConfig = {
-        version: 1,
+      // Remote has existing settings from another device (with a custom category)
+      const remoteConfig: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now() - 86400000, // 1 day ago
         deviceId: 'macbook-device',
         filters: [{ id: 'filter-1', pattern: 'Rent Payment', createdAt: 1000 }],
         disabledCalendars: ['work-calendar'],
-        disabledBuiltInCategories: ['holidays'],
-        customCategories: [],
+        categories: [
+          {
+            id: 'birthdays',
+            label: 'Birthdays',
+            color: '#F59E0B',
+            keywords: ['birthday'],
+            matchMode: 'any',
+            createdAt: 1000,
+            updatedAt: 1000,
+            isDefault: true,
+          },
+          {
+            id: 'custom-cat',
+            label: 'My Custom',
+            color: '#FF0000',
+            keywords: ['custom'],
+            matchMode: 'any',
+            createdAt: 1000,
+            updatedAt: 1000,
+            isDefault: false,
+          },
+        ],
       }
 
       vi.mocked(readCloudConfig).mockResolvedValue({ success: true, data: remoteConfig })
 
-      let writtenConfig: CloudConfig | null = null
+      let writtenConfig: CloudConfigV2 | null = null
       vi.mocked(writeCloudConfig).mockImplementation(async (config) => {
-        writtenConfig = config
+        writtenConfig = config as CloudConfigV2
         return {
           success: true,
           data: { id: 'file-123', name: 'yearbird-config.json', mimeType: 'application/json' },
@@ -1360,12 +1519,13 @@ describe('syncManager', () => {
 
       expect(result.status).toBe('success')
 
-      // The written config should have the remote settings, not empty local settings
+      // The written config should have the remote settings
       expect(writtenConfig).not.toBeNull()
       expect(writtenConfig!.filters).toEqual(remoteConfig.filters)
       expect(writtenConfig!.disabledCalendars).toEqual(remoteConfig.disabledCalendars)
-      expect(writtenConfig!.disabledBuiltInCategories).toEqual(remoteConfig.disabledBuiltInCategories)
-      // But should use the new device's ID
+      // Categories merged - should include custom-cat from remote
+      expect(writtenConfig!.categories.find((c) => c.id === 'custom-cat')).toBeDefined()
+      // Should use the new device's ID
       expect(writtenConfig!.deviceId).toBe('tv-device')
     })
 
@@ -1374,34 +1534,54 @@ describe('syncManager', () => {
       const { checkDriveAccess, readCloudConfig, writeCloudConfig } = await import('./driveSync')
       const { getFilters } = await import('./filters')
       const { getDisabledCalendars } = await import('./calendarVisibility')
-      const { getDisabledBuiltInCategories } = await import('./builtInCategories')
-      const { getCustomCategories } = await import('./customCategories')
+      const { getCategories } = await import('./categories')
 
       vi.mocked(hasDriveScope).mockReturnValue(true)
       vi.mocked(checkDriveAccess).mockResolvedValue(true)
 
-      // Local has some settings
+      // Local has a custom category (not just defaults - has data)
+      const localCategories = [
+        {
+          id: 'birthdays',
+          label: 'Birthdays',
+          color: '#F59E0B',
+          keywords: ['birthday'],
+          matchMode: 'any' as const,
+          createdAt: 2000,
+          updatedAt: 2000,
+          isDefault: true,
+        },
+        {
+          id: 'local-custom',
+          label: 'Local Custom',
+          color: '#00FF00',
+          keywords: ['local'],
+          matchMode: 'any' as const,
+          createdAt: 2000,
+          updatedAt: 2000,
+          isDefault: false,
+        },
+      ]
+
       vi.mocked(getFilters).mockReturnValue([{ id: 'local-filter', pattern: 'Local', createdAt: 2000 }])
       vi.mocked(getDisabledCalendars).mockReturnValue([])
-      vi.mocked(getDisabledBuiltInCategories).mockReturnValue([])
-      vi.mocked(getCustomCategories).mockReturnValue([])
+      vi.mocked(getCategories).mockReturnValue(localCategories)
 
       // Remote has different settings
-      const remoteConfig: CloudConfig = {
-        version: 1,
+      const remoteConfig: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now() - 86400000, // 1 day ago (older)
         deviceId: 'macbook-device',
         filters: [{ id: 'remote-filter', pattern: 'Remote', createdAt: 1000 }],
         disabledCalendars: [],
-        disabledBuiltInCategories: [],
-        customCategories: [],
+        categories: [],
       }
 
       vi.mocked(readCloudConfig).mockResolvedValue({ success: true, data: remoteConfig })
 
-      let writtenConfig: CloudConfig | null = null
+      let writtenConfig: CloudConfigV2 | null = null
       vi.mocked(writeCloudConfig).mockImplementation(async (config) => {
-        writtenConfig = config
+        writtenConfig = config as CloudConfigV2
         return {
           success: true,
           data: { id: 'file-123', name: 'yearbird-config.json', mimeType: 'application/json' },
@@ -1418,6 +1598,102 @@ describe('syncManager', () => {
       // Local is newer (Date.now() > remote.updatedAt), so local filters should win
       expect(writtenConfig).not.toBeNull()
       expect(writtenConfig!.filters).toEqual([{ id: 'local-filter', pattern: 'Local', createdAt: 2000 }])
+    })
+  })
+
+  describe('deleteCloudData', () => {
+    it('returns success when delete succeeds', async () => {
+      const { deleteCloudConfig } = await import('./driveSync')
+      vi.mocked(deleteCloudConfig).mockResolvedValue({ success: true })
+
+      saveSyncSettings({ enabled: true, lastSyncedAt: 1234567890, deviceId: 'test' })
+
+      const result = await deleteCloudData()
+
+      expect(result.status).toBe('success')
+      expect(deleteCloudConfig).toHaveBeenCalled()
+
+      // lastSyncedAt should be reset
+      const settings = getSyncSettings()
+      expect(settings.lastSyncedAt).toBeNull()
+      expect(settings.deviceId).toBe('test') // deviceId should be preserved
+    })
+
+    it('returns error when delete fails', async () => {
+      const { deleteCloudConfig } = await import('./driveSync')
+      vi.mocked(deleteCloudConfig).mockResolvedValue({
+        success: false,
+        error: { code: 403, message: 'Forbidden' },
+      })
+
+      const result = await deleteCloudData()
+
+      expect(result.status).toBe('error')
+      if (result.status === 'error') {
+        expect(result.message).toBe('Forbidden')
+      }
+      expect(getLastSyncError()).toBe('Forbidden')
+    })
+
+    it('returns error with default message when no error message provided', async () => {
+      const { deleteCloudConfig } = await import('./driveSync')
+      vi.mocked(deleteCloudConfig).mockResolvedValue({
+        success: false,
+        error: { code: 500 },
+      })
+
+      const result = await deleteCloudData()
+
+      expect(result.status).toBe('error')
+      if (result.status === 'error') {
+        expect(result.message).toBe('Failed to delete cloud data')
+      }
+    })
+
+    it('handles unexpected exceptions', async () => {
+      const { deleteCloudConfig } = await import('./driveSync')
+      vi.mocked(deleteCloudConfig).mockRejectedValue(new Error('Network error'))
+
+      const result = await deleteCloudData()
+
+      expect(result.status).toBe('error')
+      if (result.status === 'error') {
+        expect(result.message).toBe('Network error')
+      }
+    })
+
+    it('clears lastSyncError on success', async () => {
+      const { deleteCloudConfig, checkDriveAccess } = await import('./driveSync')
+      const { hasDriveScope } = await import('./auth')
+
+      // First create an error state
+      vi.mocked(hasDriveScope).mockReturnValue(true)
+      vi.mocked(checkDriveAccess).mockResolvedValue(false)
+      saveSyncSettings({ enabled: true, lastSyncedAt: null, deviceId: 'test' })
+      await performSync() // This will set lastSyncError
+      expect(getLastSyncError()).toBe('Cannot access Google Drive')
+
+      // Now delete successfully
+      vi.mocked(deleteCloudConfig).mockResolvedValue({ success: true })
+      const result = await deleteCloudData()
+
+      expect(result.status).toBe('success')
+      expect(getLastSyncError()).toBeNull()
+    })
+
+    it('returns error when offline', async () => {
+      const originalOnLine = navigator.onLine
+      Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+
+      const result = await deleteCloudData()
+
+      expect(result.status).toBe('error')
+      if (result.status === 'error') {
+        expect(result.message).toBe('Cannot delete cloud data while offline')
+      }
+      expect(getLastSyncError()).toBe('Cannot delete cloud data while offline')
+
+      Object.defineProperty(navigator, 'onLine', { value: originalOnLine, configurable: true })
     })
   })
 })

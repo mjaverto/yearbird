@@ -97,9 +97,14 @@ export function CloudSyncToggle({ className }: CloudSyncToggleProps) {
     disable,
     syncNow,
     clearError,
+    deleteData,
   } = useCloudSync()
 
   const [isEnabling, setIsEnabling] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteSuccess, setDeleteSuccess] = useState(false)
 
   const handleToggle = async () => {
     if (isEnabled) {
@@ -117,6 +122,37 @@ export function CloudSyncToggle({ className }: CloudSyncToggleProps) {
   const handleRetry = async () => {
     clearError()
     await syncNow()
+  }
+
+  const handleDelete = async () => {
+    setIsDeleting(true)
+    setDeleteError(null)
+    setDeleteSuccess(false)
+    try {
+      const success = await deleteData()
+      if (success) {
+        setShowDeleteConfirm(false)
+        setDeleteSuccess(true)
+        // Auto-hide success message after 3 seconds
+        setTimeout(() => setDeleteSuccess(false), 3000)
+      } else {
+        setDeleteError(error || 'Failed to delete cloud data')
+      }
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete cloud data')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  // Reset delete confirmation when sync is toggled off
+  const handleToggleWithReset = async () => {
+    if (isEnabled) {
+      setShowDeleteConfirm(false)
+      setDeleteError(null)
+      setDeleteSuccess(false)
+    }
+    await handleToggle()
   }
 
   return (
@@ -139,7 +175,7 @@ export function CloudSyncToggle({ className }: CloudSyncToggleProps) {
           role="switch"
           aria-checked={isEnabled}
           disabled={isEnabling}
-          onClick={handleToggle}
+          onClick={handleToggleWithReset}
           className={`
             relative inline-flex h-6 w-10 flex-shrink-0 cursor-pointer rounded-full
             border-2 border-transparent transition-colors duration-200 ease-in-out
@@ -173,17 +209,64 @@ export function CloudSyncToggle({ className }: CloudSyncToggleProps) {
             )}
           </div>
 
-          {status === 'error' && error && (
-            <Button plain onClick={handleRetry} className="text-xs">
-              Retry
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {status === 'error' && error && (
+              <Button plain onClick={handleRetry} className="text-xs">
+                Retry
+              </Button>
+            )}
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={status === 'syncing' || isDeleting}
+                className="p-1 text-zinc-400 hover:text-red-500 disabled:opacity-50 transition-colors"
+                title="Delete cloud data"
+                aria-label="Delete cloud data"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                  <path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <Button
+                  plain
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="text-xs text-red-600 hover:text-red-700"
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </Button>
+                <Button
+                  plain
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  className="text-xs"
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {error && (
         <div className="mt-2 rounded bg-red-50 p-2">
           <p className="text-xs text-red-600">{error}</p>
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="mt-2 rounded bg-red-50 p-2" role="alert">
+          <p className="text-xs text-red-600">Delete failed: {deleteError}</p>
+        </div>
+      )}
+
+      {deleteSuccess && (
+        <div className="mt-2 rounded bg-emerald-50 p-2" role="status" aria-live="polite">
+          <p className="text-xs text-emerald-600">Cloud data deleted successfully</p>
         </div>
       )}
 

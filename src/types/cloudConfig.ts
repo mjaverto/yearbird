@@ -66,6 +66,12 @@ export interface CloudConfigV2 {
   filters: EventFilter[]
   disabledCalendars: string[]
   categories: CloudCategory[]
+
+  /** Display settings */
+  /** Show single-day timed events (default: false) */
+  showTimedEvents?: boolean
+  /** Match event descriptions for categorization (default: false) */
+  matchDescription?: boolean
 }
 
 /**

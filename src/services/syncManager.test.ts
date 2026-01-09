@@ -1321,6 +1321,16 @@ describe('syncManager', () => {
       expect(v2Config.categories.find((c) => c.id === 'custom-1')).toBeDefined()
     })
 
+    // Base config for display settings tests
+    const baseConfig: CloudConfigV2 = {
+      version: 2,
+      updatedAt: 1000,
+      deviceId: 'device-1',
+      filters: [],
+      disabledCalendars: [],
+      categories: [],
+    }
+
     it('uses remote display settings when remote is newer', () => {
       const local: CloudConfig = {
         ...baseConfig,

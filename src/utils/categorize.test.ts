@@ -148,8 +148,9 @@ describe('categorizeEvent', () => {
 
   describe('description matching', () => {
     it('does not match description when matchDescription is false', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
       // Use a title that doesn't match any category
-      const result = categorizeEvent('Random event xyz', undefined, {
+      const result = categorizeEvent('Random event xyz', matchList, {
         description: "John's birthday party planning",
         matchDescription: false,
       })
@@ -158,8 +159,9 @@ describe('categorizeEvent', () => {
     })
 
     it('does not match description when matchDescription is undefined', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
       // Use a title that doesn't match any category
-      const result = categorizeEvent('Random event xyz', undefined, {
+      const result = categorizeEvent('Random event xyz', matchList, {
         description: "John's birthday party planning",
       })
 
@@ -167,7 +169,8 @@ describe('categorizeEvent', () => {
     })
 
     it('matches category from description when matchDescription is true', () => {
-      const result = categorizeEvent('Team sync', undefined, {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Team sync', matchList, {
         description: "Celebrating John's birthday at the office",
         matchDescription: true,
       })
@@ -176,7 +179,8 @@ describe('categorizeEvent', () => {
     })
 
     it('prioritizes title match over description match', () => {
-      const result = categorizeEvent('Birthday party', undefined, {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Birthday party', matchList, {
         description: 'Weekly team meeting notes',
         matchDescription: true,
       })
@@ -186,7 +190,8 @@ describe('categorizeEvent', () => {
     })
 
     it('handles empty description gracefully', () => {
-      const result = categorizeEvent('Random event', undefined, {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Random event', matchList, {
         description: '',
         matchDescription: true,
       })
@@ -195,7 +200,8 @@ describe('categorizeEvent', () => {
     })
 
     it('handles undefined description gracefully', () => {
-      const result = categorizeEvent('Random event', undefined, {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Random event', matchList, {
         matchDescription: true,
       })
 
@@ -203,7 +209,8 @@ describe('categorizeEvent', () => {
     })
 
     it('is case insensitive for description matching', () => {
-      const result = categorizeEvent('Random sync', undefined, {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Random sync', matchList, {
         description: 'BIRTHDAY CELEBRATION',
         matchDescription: true,
       })

@@ -45,7 +45,7 @@ export function getCategoryMatchList(
 }
 
 const matchesKeywords = (
-  lowerTitle: string,
+  lowerText: string,
   keywords: string[],
   matchMode: CategoryMatchMode
 ) => {
@@ -54,21 +54,67 @@ const matchesKeywords = (
   }
 
   if (matchMode === 'all') {
-    return keywords.every((keyword) => lowerTitle.includes(keyword.toLowerCase()))
+    return keywords.every((keyword) => lowerText.includes(keyword.toLowerCase()))
   }
 
-  return keywords.some((keyword) => lowerTitle.includes(keyword.toLowerCase()))
+  return keywords.some((keyword) => lowerText.includes(keyword.toLowerCase()))
 }
 
+/**
+ * Options for event categorization.
+ */
+export interface CategorizeOptions {
+  /** The event description to optionally match against */
+  description?: string
+  /** Whether to also search the description for category keywords */
+  matchDescription?: boolean
+}
+
+/**
+ * Categorizes an event based on its title and optionally its description.
+ *
+ * Matches event text against category keyword patterns. Title matches take
+ * priority over description matches. Returns the first matching category
+ * or defaults to 'other' if no match is found.
+ *
+ * @param title - The event title to categorize
+ * @param categories - Category configurations to match against (default: all configured categories)
+ * @param options - Optional settings for description matching
+ * @returns The matched category and its color
+ *
+ * @example
+ * // Basic categorization by title
+ * const result = categorizeEvent('Team Meeting')
+ *
+ * @example
+ * // With description matching enabled
+ * const result = categorizeEvent('Quarterly Review', categories, {
+ *   description: 'Discuss project milestones and team goals',
+ *   matchDescription: true,
+ * })
+ */
 export function categorizeEvent(
   title: string,
-  categories: CategoryConfig[] = getCategoryMatchList()
+  categories: CategoryConfig[] = getCategoryMatchList(),
+  options?: CategorizeOptions
 ): { category: EventCategory; color: string } {
   const lowerTitle = title.toLowerCase()
+  const lowerDescription =
+    options?.matchDescription && options?.description
+      ? options.description.toLowerCase()
+      : ''
 
   for (const config of categories) {
     const matchMode = config.matchMode ?? DEFAULT_MATCH_MODE
+    // Check title first
     if (matchesKeywords(lowerTitle, config.keywords, matchMode)) {
+      return {
+        category: config.category,
+        color: config.color,
+      }
+    }
+    // Check description if enabled and available
+    if (lowerDescription && matchesKeywords(lowerDescription, config.keywords, matchMode)) {
       return {
         category: config.category,
         color: config.color,

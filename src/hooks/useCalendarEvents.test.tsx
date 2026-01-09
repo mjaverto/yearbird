@@ -19,6 +19,7 @@ const cachedEvent: YearbirdEvent = {
   endDate: '2026-01-03',
   isAllDay: true,
   isMultiDay: true,
+  isSingleDayTimed: false,
   durationDays: 2,
   googleLink: '',
   category: 'uncategorized',
@@ -73,9 +74,13 @@ describe('useCalendarEvents', () => {
     const { result } = renderHook(() => useCalendarEvents('token', 2026, CALENDAR_IDS))
 
     await waitFor(() => expect(fetchEventsForYearMock).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(result.current.events).toHaveLength(1))
+    await waitFor(() => expect(result.current.events).toHaveLength(2))
     expect(result.current.isFromCache).toBe(false)
-    expect(result.current.events[0]?.category).toBe('birthdays')
+    // Events include both all-day and single-day timed events
+    const birthdayEvent = result.current.events.find((e) => e.title === "Mom's birthday")
+    const meetingEvent = result.current.events.find((e) => e.title === 'Meeting')
+    expect(birthdayEvent?.category).toBe('birthdays')
+    expect(meetingEvent?.isSingleDayTimed).toBe(true)
 
     fetchEventsForYearMock.mockResolvedValueOnce([
       {

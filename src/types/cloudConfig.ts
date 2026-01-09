@@ -43,6 +43,12 @@ export interface CloudConfig {
   disabledBuiltInCategories: BuiltInCategory[]
   /** User-defined category rules */
   customCategories: CloudCustomCategory[]
+
+  /** Display settings */
+  /** Show single-day timed events (default: false) */
+  showTimedEvents?: boolean
+  /** Match event descriptions for categorization (default: false) */
+  matchDescription?: boolean
 }
 
 /**

@@ -12,6 +12,7 @@ import { secondaryActionClasses } from '../styles/secondaryActions'
 import { CloudSyncToggle } from './CloudSyncToggle'
 import { CustomCategoryManager } from './CustomCategoryManager'
 import { Button } from './ui/button'
+import { Switch } from './ui/switch'
 
 type SettingsTab = 'hidden' | 'calendars' | 'categories'
 
@@ -36,6 +37,10 @@ interface FilterPanelProps {
   onRemoveCustomCategory: (id: CustomCategoryId) => void
   isOpen: boolean
   onClose: () => void
+  showTimedEvents: boolean
+  onSetShowTimedEvents: (value: boolean) => void
+  matchDescription: boolean
+  onSetMatchDescription: (value: boolean) => void
 }
 
 export function FilterPanel({
@@ -59,6 +64,10 @@ export function FilterPanel({
   onRemoveCustomCategory,
   isOpen,
   onClose,
+  showTimedEvents,
+  onSetShowTimedEvents,
+  matchDescription,
+  onSetMatchDescription,
 }: FilterPanelProps) {
   const [newPattern, setNewPattern] = useState('')
   const [customResetToken, setCustomResetToken] = useState(0)
@@ -408,7 +417,42 @@ export function FilterPanel({
             </div>
           </div>
 
-          <div className="mt-3 border-t border-zinc-100 pt-3">
+          <div className="mt-3 space-y-3 border-t border-zinc-100 pt-3">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+              <h4 className="text-sm font-medium text-zinc-900">Display Settings</h4>
+              <div className="mt-2 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-zinc-700">Show timed events</p>
+                    <p className="text-xs text-zinc-500">
+                      Include single-day timed events (meetings, appointments).
+                    </p>
+                  </div>
+                  <Switch
+                    checked={showTimedEvents}
+                    onChange={onSetShowTimedEvents}
+                    label="timed events"
+                    enabledLabel="Show timed events"
+                    disabledLabel="Hide timed events"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-zinc-700">Match descriptions</p>
+                    <p className="text-xs text-zinc-500">
+                      Also search event descriptions when categorizing.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={matchDescription}
+                    onChange={onSetMatchDescription}
+                    label="description matching"
+                  />
+                </div>
+              </div>
+            </div>
+
             <CloudSyncToggle />
           </div>
         </Dialog.Panel>

@@ -48,6 +48,8 @@ vi.mock('./customCategories', () => ({
   getCustomCategories: vi.fn(() => []),
 }))
 
+// Note: displaySettings is NOT mocked - we test with real localStorage integration
+
 describe('syncManager', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -320,6 +322,85 @@ describe('syncManager', () => {
       expect(localStorage.getItem('yearbird:filters')).toBeNull()
       expect(localStorage.getItem('yearbird:disabled-calendars')).toBeNull()
     })
+
+    it('applies showTimedEvents to localStorage', () => {
+      const config: CloudConfig = {
+        version: 1,
+        updatedAt: Date.now(),
+        deviceId: 'test-device',
+        filters: [],
+        disabledCalendars: [],
+        disabledBuiltInCategories: [],
+        customCategories: [],
+        showTimedEvents: true,
+      }
+
+      applyCloudConfigToLocal(config)
+
+      expect(localStorage.getItem('yearbird:show-timed-events')).toBe('true')
+    })
+
+    it('applies matchDescription to localStorage', () => {
+      const config: CloudConfig = {
+        version: 1,
+        updatedAt: Date.now(),
+        deviceId: 'test-device',
+        filters: [],
+        disabledCalendars: [],
+        disabledBuiltInCategories: [],
+        customCategories: [],
+        matchDescription: true,
+      }
+
+      applyCloudConfigToLocal(config)
+
+      expect(localStorage.getItem('yearbird:match-description')).toBe('true')
+    })
+
+    it('does not set display settings when undefined in config', () => {
+      // Pre-set values
+      localStorage.setItem('yearbird:show-timed-events', 'true')
+      localStorage.setItem('yearbird:match-description', 'true')
+
+      const config: CloudConfig = {
+        version: 1,
+        updatedAt: Date.now(),
+        deviceId: 'test-device',
+        filters: [],
+        disabledCalendars: [],
+        disabledBuiltInCategories: [],
+        customCategories: [],
+        // showTimedEvents and matchDescription are undefined
+      }
+
+      applyCloudConfigToLocal(config)
+
+      // Original values should remain unchanged
+      expect(localStorage.getItem('yearbird:show-timed-events')).toBe('true')
+      expect(localStorage.getItem('yearbird:match-description')).toBe('true')
+    })
+
+    it('removes display settings keys when set to false', () => {
+      localStorage.setItem('yearbird:show-timed-events', 'true')
+      localStorage.setItem('yearbird:match-description', 'true')
+
+      const config: CloudConfig = {
+        version: 1,
+        updatedAt: Date.now(),
+        deviceId: 'test-device',
+        filters: [],
+        disabledCalendars: [],
+        disabledBuiltInCategories: [],
+        customCategories: [],
+        showTimedEvents: false,
+        matchDescription: false,
+      }
+
+      applyCloudConfigToLocal(config)
+
+      expect(localStorage.getItem('yearbird:show-timed-events')).toBeNull()
+      expect(localStorage.getItem('yearbird:match-description')).toBeNull()
+    })
   })
 
   describe('clearSyncError', () => {
@@ -379,6 +460,37 @@ describe('syncManager', () => {
       expect(config.filters).toEqual([{ id: 'f1', pattern: 'test', createdAt: 1000 }])
       expect(config.disabledCalendars).toEqual(['cal-1'])
       expect(config.disabledBuiltInCategories).toEqual(['work'])
+    })
+
+    it('includes display settings in built config', () => {
+      // Set display settings via localStorage (what the actual implementation reads)
+      localStorage.setItem('yearbird:show-timed-events', 'true')
+      localStorage.setItem('yearbird:match-description', 'true')
+
+      saveSyncSettings({
+        enabled: true,
+        lastSyncedAt: null,
+        deviceId: 'test-device',
+      })
+
+      const config = buildCloudConfigFromLocal()
+
+      expect(config.showTimedEvents).toBe(true)
+      expect(config.matchDescription).toBe(true)
+    })
+
+    it('includes false display settings values', () => {
+      // localStorage clear means values are false by default
+      saveSyncSettings({
+        enabled: true,
+        lastSyncedAt: null,
+        deviceId: 'test-device',
+      })
+
+      const config = buildCloudConfigFromLocal()
+
+      expect(config.showTimedEvents).toBe(false)
+      expect(config.matchDescription).toBe(false)
     })
   })
 
@@ -1111,6 +1223,90 @@ describe('syncManager', () => {
       const merged = mergeConfigs(local, remote)
 
       expect(merged.disabledBuiltInCategories).toEqual(['work'])
+    })
+
+    it('uses remote display settings when remote is newer', () => {
+      const local: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 1000,
+        showTimedEvents: false,
+        matchDescription: false,
+      }
+
+      const remote: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 2000,
+        showTimedEvents: true,
+        matchDescription: true,
+      }
+
+      const merged = mergeConfigs(local, remote)
+
+      expect(merged.showTimedEvents).toBe(true)
+      expect(merged.matchDescription).toBe(true)
+    })
+
+    it('uses local display settings when local is newer', () => {
+      const local: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 2000,
+        showTimedEvents: true,
+        matchDescription: true,
+      }
+
+      const remote: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 1000,
+        showTimedEvents: false,
+        matchDescription: false,
+      }
+
+      const merged = mergeConfigs(local, remote)
+
+      expect(merged.showTimedEvents).toBe(true)
+      expect(merged.matchDescription).toBe(true)
+    })
+
+    it('handles undefined display settings in remote', () => {
+      const local: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 1000,
+        showTimedEvents: true,
+        matchDescription: true,
+      }
+
+      const remote: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 2000,
+        // No display settings - simulates old config without these fields
+      }
+
+      const merged = mergeConfigs(local, remote)
+
+      // Remote is newer but has undefined, so merged gets undefined
+      expect(merged.showTimedEvents).toBeUndefined()
+      expect(merged.matchDescription).toBeUndefined()
+    })
+
+    it('handles undefined display settings in local', () => {
+      const local: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 2000,
+        // No display settings
+      }
+
+      const remote: CloudConfig = {
+        ...baseConfig,
+        updatedAt: 1000,
+        showTimedEvents: true,
+        matchDescription: true,
+      }
+
+      const merged = mergeConfigs(local, remote)
+
+      // Local is newer but has undefined, so merged gets undefined
+      expect(merged.showTimedEvents).toBeUndefined()
+      expect(merged.matchDescription).toBeUndefined()
     })
   })
 

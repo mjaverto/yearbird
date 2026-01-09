@@ -11,6 +11,7 @@ import {
   performSync,
   isSyncEnabled,
   initSyncListeners,
+  deleteCloudData,
 } from '../services/syncManager'
 
 interface UseCloudSyncResult {
@@ -32,6 +33,8 @@ interface UseCloudSyncResult {
   syncNow: () => Promise<boolean>
   /** Clear the last error */
   clearError: () => void
+  /** Delete all cloud data from Google Drive */
+  deleteData: () => Promise<boolean>
 }
 
 /**
@@ -125,6 +128,13 @@ export function useCloudSync(): UseCloudSyncResult {
     setError(null)
   }, [])
 
+  const deleteData = useCallback(async (): Promise<boolean> => {
+    setStatus('syncing')
+    const result = await deleteCloudData()
+    refreshState()
+    return result.status === 'success'
+  }, [refreshState])
+
   return {
     isEnabled,
     status,
@@ -135,5 +145,6 @@ export function useCloudSync(): UseCloudSyncResult {
     disable,
     syncNow,
     clearError,
+    deleteData,
   }
 }

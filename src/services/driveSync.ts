@@ -10,8 +10,14 @@
  * @see https://developers.google.com/workspace/drive/api/guides/appdata
  */
 
-import type { CloudConfig, EventFilter, CloudCustomCategory } from '../types/cloudConfig'
-import type { BuiltInCategory } from '../types/calendar'
+import type {
+  CloudConfig,
+  CloudConfigV1,
+  CloudConfigV2,
+  CloudCategory,
+  CloudCustomCategory,
+  EventFilter,
+} from '../types/cloudConfig'
 import { getStoredAuth } from './auth'
 
 /** Maximum allowed length for string fields to prevent abuse */
@@ -21,6 +27,7 @@ const MAX_ARRAY_LENGTH = 500
 
 /**
  * Validate and sanitize a CloudConfig from Drive.
+ * Supports both v1 (legacy) and v2 (unified) schemas.
  * Returns null if the config is invalid or malformed.
  */
 function validateCloudConfig(data: unknown): CloudConfig | null {
@@ -31,17 +38,16 @@ function validateCloudConfig(data: unknown): CloudConfig | null {
   const config = data as Record<string, unknown>
 
   // Validate version
-  if (config.version !== 1) {
+  if (config.version !== 1 && config.version !== 2) {
     console.warn('Invalid cloud config version:', config.version)
     return null
   }
 
-  // Validate updatedAt
+  // Validate common fields
   if (typeof config.updatedAt !== 'number' || !Number.isFinite(config.updatedAt)) {
     return null
   }
 
-  // Validate deviceId
   if (typeof config.deviceId !== 'string' || config.deviceId.length > MAX_STRING_LENGTH) {
     return null
   }
@@ -67,15 +73,31 @@ function validateCloudConfig(data: unknown): CloudConfig | null {
     }
   }
 
+  // Version-specific validation
+  if (config.version === 2) {
+    return validateV2Config(config, filters, disabledCalendars)
+  } else {
+    return validateV1Config(config, filters, disabledCalendars)
+  }
+}
+
+/**
+ * Validate v1 (legacy) config schema
+ */
+function validateV1Config(
+  config: Record<string, unknown>,
+  filters: EventFilter[],
+  disabledCalendars: string[]
+): CloudConfigV1 | null {
   // Validate disabledBuiltInCategories array
   if (!Array.isArray(config.disabledBuiltInCategories) || config.disabledBuiltInCategories.length > MAX_ARRAY_LENGTH) {
     return null
   }
   const validBuiltInCategories = ['birthdays', 'family', 'holidays', 'adventures', 'races', 'work']
-  const disabledBuiltInCategories: BuiltInCategory[] = []
+  const disabledBuiltInCategories: string[] = []
   for (const cat of config.disabledBuiltInCategories) {
     if (typeof cat === 'string' && validBuiltInCategories.includes(cat)) {
-      disabledBuiltInCategories.push(cat as BuiltInCategory)
+      disabledBuiltInCategories.push(cat)
     }
   }
 
@@ -91,12 +113,40 @@ function validateCloudConfig(data: unknown): CloudConfig | null {
 
   return {
     version: 1,
-    updatedAt: config.updatedAt,
-    deviceId: config.deviceId,
+    updatedAt: config.updatedAt as number,
+    deviceId: config.deviceId as string,
     filters,
     disabledCalendars,
     disabledBuiltInCategories,
     customCategories,
+  }
+}
+
+/**
+ * Validate v2 (unified) config schema
+ */
+function validateV2Config(
+  config: Record<string, unknown>,
+  filters: EventFilter[],
+  disabledCalendars: string[]
+): CloudConfigV2 | null {
+  // Validate categories array
+  if (!Array.isArray(config.categories) || config.categories.length > MAX_ARRAY_LENGTH) {
+    return null
+  }
+  const categories: CloudCategory[] = []
+  for (const cat of config.categories) {
+    if (!isValidCategory(cat)) continue
+    categories.push(cat as CloudCategory)
+  }
+
+  return {
+    version: 2,
+    updatedAt: config.updatedAt as number,
+    deviceId: config.deviceId as string,
+    filters,
+    disabledCalendars,
+    categories,
   }
 }
 
@@ -131,6 +181,31 @@ function isValidCustomCategory(c: unknown): boolean {
     Number.isFinite(cat.createdAt) &&
     typeof cat.updatedAt === 'number' &&
     Number.isFinite(cat.updatedAt)
+  )
+}
+
+/**
+ * Validate a v2 unified category (includes isDefault flag)
+ */
+function isValidCategory(c: unknown): boolean {
+  if (!c || typeof c !== 'object') return false
+  const cat = c as Record<string, unknown>
+  return (
+    typeof cat.id === 'string' &&
+    cat.id.length <= MAX_STRING_LENGTH &&
+    typeof cat.label === 'string' &&
+    cat.label.length <= MAX_STRING_LENGTH &&
+    typeof cat.color === 'string' &&
+    cat.color.length <= 20 &&
+    Array.isArray(cat.keywords) &&
+    cat.keywords.length <= MAX_ARRAY_LENGTH &&
+    cat.keywords.every((k: unknown) => typeof k === 'string' && (k as string).length <= MAX_STRING_LENGTH) &&
+    (cat.matchMode === 'any' || cat.matchMode === 'all') &&
+    typeof cat.createdAt === 'number' &&
+    Number.isFinite(cat.createdAt) &&
+    typeof cat.updatedAt === 'number' &&
+    Number.isFinite(cat.updatedAt) &&
+    (cat.isDefault === undefined || typeof cat.isDefault === 'boolean')
   )
 }
 

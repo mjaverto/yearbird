@@ -149,7 +149,7 @@ describe('useTooltip', () => {
     expect(result.current.tooltip.event).toBeNull()
   })
 
-  it('defers switching pointer hovers until the hide delay completes', async () => {
+  it('immediately switches tooltips when hovering a new event during hide delay', async () => {
     vi.useFakeTimers()
     const { useTooltip } = await import('./useTooltip')
     const eventA = buildEvent({ id: 'event-a' })
@@ -161,15 +161,17 @@ describe('useTooltip', () => {
     })
 
     act(() => {
-      result.current.scheduleHideTooltip(eventA.id)
+      result.current.scheduleHideTooltip()
     })
 
+    // New event should show immediately - no need to wait for delay
     act(() => {
       result.current.showTooltip(eventB, { x: 8, y: 10 }, 'pointer')
     })
 
-    expect(result.current.tooltip.event).toEqual(eventA)
+    expect(result.current.tooltip.event).toEqual(eventB)
 
+    // Delay should have been cancelled, so advancing time should not hide tooltip
     act(() => {
       vi.advanceTimersByTime(1000)
     })
@@ -178,26 +180,45 @@ describe('useTooltip', () => {
     vi.useRealTimers()
   })
 
-  it('allows immediate hover changes when lock is disabled', async () => {
+  it('handles rapid hover across multiple events without flicker', async () => {
     vi.useFakeTimers()
     const { useTooltip } = await import('./useTooltip')
     const eventA = buildEvent({ id: 'event-a' })
     const eventB = buildEvent({ id: 'event-b' })
+    const eventC = buildEvent({ id: 'event-c' })
+    const eventD = buildEvent({ id: 'event-d' })
     const { result } = renderHook(() => useTooltip())
 
+    // Simulate rapid mouse movement across 4 events
     act(() => {
       result.current.showTooltip(eventA, { x: 1, y: 1 }, 'pointer')
     })
+    expect(result.current.tooltip.event?.id).toBe('event-a')
 
     act(() => {
-      result.current.scheduleHideTooltip(undefined, { lockHover: false })
+      result.current.scheduleHideTooltip()
+      result.current.showTooltip(eventB, { x: 2, y: 2 }, 'pointer')
     })
+    expect(result.current.tooltip.event?.id).toBe('event-b')
 
     act(() => {
-      result.current.showTooltip(eventB, { x: 5, y: 6 }, 'pointer')
+      result.current.scheduleHideTooltip()
+      result.current.showTooltip(eventC, { x: 3, y: 3 }, 'pointer')
     })
+    expect(result.current.tooltip.event?.id).toBe('event-c')
 
-    expect(result.current.tooltip.event).toEqual(eventB)
+    act(() => {
+      result.current.scheduleHideTooltip()
+      result.current.showTooltip(eventD, { x: 4, y: 4 }, 'pointer')
+    })
+    expect(result.current.tooltip.event?.id).toBe('event-d')
+
+    // Final event should persist after delay (no hide scheduled since we're still on an event)
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.tooltip.event?.id).toBe('event-d')
+
     vi.useRealTimers()
   })
 

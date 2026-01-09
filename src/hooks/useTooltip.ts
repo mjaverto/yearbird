@@ -26,13 +26,6 @@ export function useTooltip() {
   const sourceRef = useRef<TooltipSource>(DEFAULT_SOURCE)
   const rafRef = useRef<number | null>(null)
   const pendingPositionRef = useRef<TooltipState['position'] | null>(null)
-  const hoverLockRef = useRef(false)
-  const activeEventIdRef = useRef<string | null>(null)
-  const pendingHoverRef = useRef<{
-    event: YearbirdEvent
-    position: TooltipState['position']
-    source: TooltipSource
-  } | null>(null)
 
   const clearHideTimeout = useCallback(() => {
     if (!hideTimeoutRef.current) {
@@ -41,20 +34,6 @@ export function useTooltip() {
 
     clearTimeout(hideTimeoutRef.current)
     hideTimeoutRef.current = null
-    hoverLockRef.current = false
-    pendingHoverRef.current = null
-  }, [])
-
-  const clearPendingHover = useCallback((eventId?: string) => {
-    if (!pendingHoverRef.current) {
-      return
-    }
-
-    if (eventId && pendingHoverRef.current.event.id !== eventId) {
-      return
-    }
-
-    pendingHoverRef.current = null
   }, [])
 
   const showTooltip = useCallback((
@@ -62,21 +41,11 @@ export function useTooltip() {
     position: TooltipState['position'],
     source: TooltipSource = DEFAULT_SOURCE
   ) => {
-    const currentEventId = activeEventIdRef.current
-    if (
-      source === 'pointer'
-      && hoverLockRef.current
-      && currentEventId
-      && currentEventId !== event.id
-    ) {
-      pendingHoverRef.current = { event, position, source }
-      return
-    }
-
+    // Cancel any pending hide timer so new events show immediately without delay.
+    // The 1s delay only applies when leaving events entirely (moving to empty space).
     clearHideTimeout()
     positionLockedRef.current = source === 'pointer'
     sourceRef.current = source
-    activeEventIdRef.current = event.id
     setTooltip({
       event,
       position,
@@ -136,32 +105,19 @@ export function useTooltip() {
     clearHideTimeout()
     positionLockedRef.current = false
     sourceRef.current = DEFAULT_SOURCE
-    activeEventIdRef.current = null
     setTooltip({ event: null, position: DEFAULT_POSITION, source: DEFAULT_SOURCE })
   }, [clearHideTimeout])
 
-  const scheduleHideTooltip = useCallback((
-    eventId?: string,
-    options?: { lockHover?: boolean }
-  ) => {
-    const lockHover = options?.lockHover !== false
-    clearPendingHover(eventId)
+  const scheduleHideTooltip = useCallback(() => {
     if (sourceRef.current !== 'pointer') {
       hideTooltip()
       return
     }
     clearHideTimeout()
-    hoverLockRef.current = lockHover
     hideTimeoutRef.current = setTimeout(() => {
-      const pendingHover = pendingHoverRef.current
-      if (pendingHover) {
-        hoverLockRef.current = false
-        showTooltip(pendingHover.event, pendingHover.position, pendingHover.source)
-        return
-      }
       hideTooltip()
     }, HIDE_DELAY_MS)
-  }, [clearHideTimeout, clearPendingHover, hideTooltip, showTooltip])
+  }, [clearHideTimeout, hideTooltip])
 
   useEffect(() => {
     return () => {

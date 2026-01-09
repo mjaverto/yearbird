@@ -23,6 +23,7 @@ vi.mock('../services/syncManager', () => ({
   performSync: vi.fn(() => Promise.resolve({ status: 'success' })),
   isSyncEnabled: vi.fn(() => false),
   initSyncListeners: vi.fn(() => vi.fn()),
+  deleteCloudData: vi.fn(() => Promise.resolve({ status: 'success' })),
 }))
 
 describe('useCloudSync', () => {
@@ -285,5 +286,34 @@ describe('useCloudSync', () => {
     })
 
     expect(requestDriveScope).toHaveBeenCalled()
+  })
+
+  it('deleteData calls deleteCloudData and returns true on success', async () => {
+    const { deleteCloudData } = await import('../services/syncManager')
+    vi.mocked(deleteCloudData).mockResolvedValue({ status: 'success' })
+
+    const { result } = renderHook(() => useCloudSync())
+
+    let success: boolean
+    await act(async () => {
+      success = await result.current.deleteData()
+    })
+
+    expect(success!).toBe(true)
+    expect(deleteCloudData).toHaveBeenCalled()
+  })
+
+  it('deleteData returns false on error', async () => {
+    const { deleteCloudData } = await import('../services/syncManager')
+    vi.mocked(deleteCloudData).mockResolvedValue({ status: 'error', message: 'Failed' })
+
+    const { result } = renderHook(() => useCloudSync())
+
+    let success: boolean
+    await act(async () => {
+      success = await result.current.deleteData()
+    })
+
+    expect(success!).toBe(false)
   })
 })

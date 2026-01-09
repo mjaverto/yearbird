@@ -10,13 +10,11 @@ import { YearPicker } from './components/YearPicker'
 import { DayHeader } from './components/calendar/DayHeader'
 import { YearGrid } from './components/calendar/YearGrid'
 import { Button } from './components/ui/button'
-import { CATEGORIES } from './config/categories'
 import { useCalendarEvents } from './hooks/useCalendarEvents'
 import { useCalendarList } from './hooks/useCalendarList'
 import { useCalendarVisibility } from './hooks/useCalendarVisibility'
 import { useAuth } from './hooks/useAuth'
-import { useBuiltInCategories } from './hooks/useBuiltInCategories'
-import { useCustomCategories } from './hooks/useCustomCategories'
+import { useCategories } from './hooks/useCategories'
 import { useFilters } from './hooks/useFilters'
 import {
   getMatchDescription,
@@ -162,25 +160,17 @@ function App() {
     calendarIdsForEvents
   )
   const {
-    customCategories,
-    addCustomCategory,
-    updateCustomCategory,
-    removeCustomCategory,
-  } = useCustomCategories()
-  const {
-    disabledBuiltInCategories,
-    disableBuiltInCategory,
-    enableBuiltInCategory,
-  } = useBuiltInCategories()
+    categories,
+    removedDefaults,
+    addCategory,
+    updateCategory,
+    removeCategory,
+    restoreDefault,
+    resetToDefaults,
+  } = useCategories()
   const { filters, addFilter, removeFilter, filterEvents } = useFilters()
-  const categoryList = useMemo(
-    () => getAllCategories(customCategories, disabledBuiltInCategories),
-    [customCategories, disabledBuiltInCategories]
-  )
-  const categoryMatchList = useMemo(
-    () => getCategoryMatchList(customCategories, disabledBuiltInCategories),
-    [customCategories, disabledBuiltInCategories]
-  )
+  const categoryList = useMemo(() => getAllCategories(categories), [categories])
+  const categoryMatchList = useMemo(() => getCategoryMatchList(categories), [categories])
   const knownCategorySet = useMemo(
     () => new Set<string>(categoryList.map((category) => category.category)),
     [categoryList]
@@ -423,10 +413,13 @@ function App() {
         filters={filters}
         onAddFilter={addFilter}
         onRemoveFilter={removeFilter}
-        builtInCategories={CATEGORIES}
-        disabledBuiltInCategories={disabledBuiltInCategories}
-        onDisableBuiltInCategory={disableBuiltInCategory}
-        onEnableBuiltInCategory={enableBuiltInCategory}
+        categories={categories}
+        removedDefaults={removedDefaults}
+        onAddCategory={addCategory}
+        onUpdateCategory={updateCategory}
+        onRemoveCategory={removeCategory}
+        onRestoreDefault={restoreDefault}
+        onResetToDefaults={resetToDefaults}
         calendars={calendars}
         disabledCalendars={disabledCalendarIds}
         onDisableCalendar={disableCalendar}
@@ -436,10 +429,6 @@ function App() {
         onRetryCalendars={refetchCalendars}
         isOpen={showFilters}
         onClose={() => setShowFilters(false)}
-        customCategories={customCategories}
-        onAddCustomCategory={addCustomCategory}
-        onUpdateCustomCategory={updateCustomCategory}
-        onRemoveCustomCategory={removeCustomCategory}
         showTimedEvents={showTimedEvents}
         onSetShowTimedEvents={handleSetShowTimedEvents}
         matchDescription={matchDescription}

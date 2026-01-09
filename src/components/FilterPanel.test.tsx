@@ -2,20 +2,41 @@ import type { ComponentProps } from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { EventFilter } from '../services/filters'
-import type { CustomCategory } from '../types/categories'
+import type { Category } from '../types/categories'
 import { FilterPanel } from './FilterPanel'
 
 type FilterPanelProps = ComponentProps<typeof FilterPanel>
 
+// Build test categories
+const buildCategory = (
+  id: string,
+  label: string,
+  keywords: string[],
+  color = '#3B82F6',
+  isDefault = false
+): Category => ({
+  id,
+  label,
+  color,
+  keywords,
+  matchMode: 'any',
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  isDefault,
+})
+
 const setup = async (overrides: Partial<FilterPanelProps> = {}) => {
   const props: FilterPanelProps = {
     filters: [],
-    builtInCategories: [],
-    disabledBuiltInCategories: [],
+    categories: [],
+    removedDefaults: [],
     onAddFilter: vi.fn(),
     onRemoveFilter: vi.fn(),
-    onDisableBuiltInCategory: vi.fn(),
-    onEnableBuiltInCategory: vi.fn(),
+    onAddCategory: vi.fn().mockReturnValue({ category: null, error: null }),
+    onUpdateCategory: vi.fn().mockReturnValue({ category: null, error: null }),
+    onRemoveCategory: vi.fn(),
+    onRestoreDefault: vi.fn().mockReturnValue({ category: null, error: null }),
+    onResetToDefaults: vi.fn(),
     calendars: [],
     disabledCalendars: [],
     onDisableCalendar: vi.fn(),
@@ -23,10 +44,6 @@ const setup = async (overrides: Partial<FilterPanelProps> = {}) => {
     isCalendarsLoading: false,
     calendarError: null,
     onRetryCalendars: vi.fn(),
-    customCategories: [],
-    onAddCustomCategory: vi.fn().mockReturnValue({ category: null, error: null }),
-    onUpdateCustomCategory: vi.fn().mockReturnValue({ category: null, error: null }),
-    onRemoveCustomCategory: vi.fn(),
     isOpen: true,
     onClose: vi.fn(),
     showTimedEvents: false,
@@ -90,8 +107,6 @@ describe('FilterPanel', () => {
     expect(props.onClose).toHaveBeenCalled()
   })
 
-
-
   it('shows empty calendar list state', async () => {
     await setup()
 
@@ -116,6 +131,7 @@ describe('FilterPanel', () => {
 
     expect(screen.getByText('No calendars selected. Enable at least one to show events.')).toBeInTheDocument()
   })
+
   it('shows calendar loading state', async () => {
     await setup({ isCalendarsLoading: true })
 
@@ -141,6 +157,7 @@ describe('FilterPanel', () => {
     })
     expect(onRetryCalendars).toHaveBeenCalled()
   })
+
   it('renders calendar toggles and fires handlers', async () => {
     const calendars = [
       { id: 'primary', summary: 'Personal', primary: true, accessRole: 'owner' },
@@ -163,36 +180,28 @@ describe('FilterPanel', () => {
     expect(onDisableCalendar).toHaveBeenCalledWith('primary')
   })
 
-  it('creates custom categories and clears the form on success', async () => {
-    const onAddCustomCategory = vi.fn().mockReturnValue({
-      category: {
-        id: 'custom-1',
-        label: 'Trips',
-        color: '#123456',
-        keywords: ['flight'],
-        matchMode: 'any',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      },
+  it('creates categories and clears the form on success', async () => {
+    const onAddCategory = vi.fn().mockReturnValue({
+      category: buildCategory('custom-1', 'Trips', ['flight'], '#123456'),
       error: null,
     })
-    await setup({ onAddCustomCategory })
+    await setup({ onAddCategory })
 
     await act(async () => {
       fireEvent.click(screen.getByRole('tab', { name: 'Categories' }))
     })
 
-    const nameInput = screen.getByLabelText('Custom category name')
-    const keywordInput = screen.getByLabelText('Custom category keywords')
+    const nameInput = screen.getByLabelText('Category name')
+    const keywordInput = screen.getByLabelText('Category keywords')
 
     await act(async () => {
       fireEvent.change(nameInput, { target: { value: 'Trips' } })
       fireEvent.change(keywordInput, { target: { value: 'flight' } })
       fireEvent.click(screen.getByText('Add'))
-      fireEvent.click(screen.getByText('Add category'))
+      fireEvent.click(screen.getByRole('button', { name: 'Add category' }))
     })
 
-    expect(onAddCustomCategory).toHaveBeenCalledWith({
+    expect(onAddCategory).toHaveBeenCalledWith({
       label: 'Trips',
       color: '#3B82F6',
       keywords: ['flight'],
@@ -201,36 +210,20 @@ describe('FilterPanel', () => {
     expect(nameInput).toHaveValue('')
   })
 
-  it('edits and deletes existing custom categories', async () => {
-    const onUpdateCustomCategory = vi.fn().mockReturnValue({
-      category: {
-        id: 'custom-1',
-        label: 'Big Trips',
-        color: '#123456',
-        keywords: ['flight'],
-        matchMode: 'all',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      },
+  it('edits and removes existing categories', async () => {
+    const onUpdateCategory = vi.fn().mockReturnValue({
+      category: buildCategory('custom-1', 'Big Trips', ['flight', 'family'], '#123456'),
       error: null,
     })
-    const onRemoveCustomCategory = vi.fn()
-    const customCategories: CustomCategory[] = [
-      {
-        id: 'custom-1',
-        label: 'Trips',
-        color: '#123456',
-        keywords: ['flight'],
-        matchMode: 'any',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      },
+    const onRemoveCategory = vi.fn()
+    const categories: Category[] = [
+      buildCategory('custom-1', 'Trips', ['flight'], '#123456'),
     ]
 
     await setup({
-      customCategories,
-      onUpdateCustomCategory,
-      onRemoveCustomCategory,
+      categories,
+      onUpdateCategory,
+      onRemoveCategory,
     })
 
     await act(async () => {
@@ -240,10 +233,10 @@ describe('FilterPanel', () => {
       fireEvent.click(screen.getByText('Edit'))
     })
 
-    const nameInput = screen.getByLabelText('Custom category name')
+    const nameInput = screen.getByLabelText('Category name')
     await act(async () => {
       fireEvent.change(nameInput, { target: { value: 'Big Trips' } })
-      fireEvent.change(screen.getByLabelText('Custom category keywords'), {
+      fireEvent.change(screen.getByLabelText('Category keywords'), {
         target: { value: 'family' },
       })
       fireEvent.click(screen.getByText('Add'))
@@ -253,7 +246,7 @@ describe('FilterPanel', () => {
       fireEvent.click(screen.getByText('Save category'))
     })
 
-    expect(onUpdateCustomCategory).toHaveBeenCalledWith('custom-1', {
+    expect(onUpdateCategory).toHaveBeenCalledWith('custom-1', {
       label: 'Big Trips',
       color: '#123456',
       keywords: ['flight', 'family'],
@@ -262,25 +255,27 @@ describe('FilterPanel', () => {
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     await act(async () => {
-      fireEvent.click(screen.getByText('Delete'))
+      // Click the Remove button for the category (not the filter Remove)
+      const removeButtons = screen.getAllByRole('button', { name: 'Remove' })
+      fireEvent.click(removeButtons[removeButtons.length - 1]!)
     })
     confirmSpy.mockRestore()
 
-    expect(onRemoveCustomCategory).toHaveBeenCalledWith('custom-1')
+    expect(onRemoveCategory).toHaveBeenCalledWith('custom-1')
   })
 
-  it('surfaces custom category errors', async () => {
-    const onAddCustomCategory = vi.fn().mockReturnValue({
+  it('surfaces category errors', async () => {
+    const onAddCategory = vi.fn().mockReturnValue({
       category: null,
       error: 'Name is required.',
     })
-    await setup({ onAddCustomCategory })
+    await setup({ onAddCategory })
 
     await act(async () => {
       fireEvent.click(screen.getByRole('tab', { name: 'Categories' }))
     })
     await act(async () => {
-      fireEvent.click(screen.getByText('Add category'))
+      fireEvent.click(screen.getByRole('button', { name: 'Add category' }))
     })
 
     expect(screen.getByText('Name is required.')).toBeInTheDocument()
@@ -322,14 +317,14 @@ describe('FilterPanel', () => {
     expect(hiddenTab).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('preserves custom category form state across tabs', async () => {
+  it('preserves category form state across tabs', async () => {
     await setup()
 
     await act(async () => {
       fireEvent.click(screen.getByRole('tab', { name: 'Categories' }))
     })
 
-    const nameInput = screen.getByLabelText('Custom category name')
+    const nameInput = screen.getByLabelText('Category name')
     await act(async () => {
       fireEvent.change(nameInput, { target: { value: 'Trips' } })
     })
@@ -339,7 +334,63 @@ describe('FilterPanel', () => {
       fireEvent.click(screen.getByRole('tab', { name: 'Categories' }))
     })
 
-    expect(screen.getByLabelText('Custom category name')).toHaveValue('Trips')
+    expect(screen.getByLabelText('Category name')).toHaveValue('Trips')
+  })
+
+  it('displays keywords for categories', async () => {
+    const categories = [
+      buildCategory('birthdays', 'Birthdays', ['birthday', 'bday'], '#F59E0B', true),
+    ]
+    await setup({ categories })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'Categories' }))
+    })
+
+    expect(screen.getByText('birthday, bday')).toBeInTheDocument()
+  })
+
+  it('shows removed defaults in a collapsible section and restores them', async () => {
+    const categories = [
+      buildCategory('birthdays', 'Birthdays', ['birthday'], '#F59E0B', true),
+    ]
+    const removedDefaults = [
+      buildCategory('work', 'Work', ['meeting'], '#8B5CF6', true),
+    ]
+    const onRestoreDefault = vi.fn().mockReturnValue({
+      category: buildCategory('work', 'Work', ['meeting'], '#8B5CF6', true),
+      error: null,
+    })
+    await setup({
+      categories,
+      removedDefaults,
+      onRestoreDefault,
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'Categories' }))
+    })
+
+    // Active category is visible
+    expect(screen.getByText('Birthdays')).toBeInTheDocument()
+
+    // Removed section is collapsed by default
+    expect(screen.getByText('Removed (1)')).toBeInTheDocument()
+    expect(screen.queryByText('Work')).not.toBeInTheDocument()
+
+    // Expand the Removed section
+    await act(async () => {
+      fireEvent.click(screen.getByText('Removed (1)'))
+    })
+
+    expect(screen.getByText('Work')).toBeInTheDocument()
+    expect(screen.getByText('Restore')).toBeInTheDocument()
+
+    // Click Restore
+    await act(async () => {
+      fireEvent.click(screen.getByText('Restore'))
+    })
+    expect(onRestoreDefault).toHaveBeenCalledWith('work')
   })
 
   describe('Display Settings', () => {

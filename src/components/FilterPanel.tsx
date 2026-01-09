@@ -1,16 +1,11 @@
 import { Dialog } from '@headlessui/react'
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import type { CustomCategoryInput, CustomCategoryResult } from '../services/customCategories'
-import type { BuiltInCategoryConfig, CustomCategory } from '../types/categories'
-import type {
-  BuiltInCategory,
-  CustomCategoryId,
-  GoogleCalendarListEntry,
-} from '../types/calendar'
+import type { Category, CategoryInput, CategoryResult } from '../types/categories'
+import type { GoogleCalendarListEntry } from '../types/calendar'
 import type { EventFilter } from '../services/filters'
 import { secondaryActionClasses } from '../styles/secondaryActions'
 import { CloudSyncToggle } from './CloudSyncToggle'
-import { CustomCategoryManager } from './CustomCategoryManager'
+import { CategoryManager } from './CategoryManager'
 import { Button } from './ui/button'
 import { Switch } from './ui/switch'
 
@@ -20,10 +15,13 @@ interface FilterPanelProps {
   filters: EventFilter[]
   onAddFilter: (pattern: string) => void
   onRemoveFilter: (id: string) => void
-  builtInCategories: BuiltInCategoryConfig[]
-  disabledBuiltInCategories: BuiltInCategory[]
-  onDisableBuiltInCategory: (category: BuiltInCategory) => void
-  onEnableBuiltInCategory: (category: BuiltInCategory) => void
+  categories: Category[]
+  removedDefaults: Category[]
+  onAddCategory: (input: CategoryInput) => CategoryResult
+  onUpdateCategory: (id: string, input: CategoryInput) => CategoryResult
+  onRemoveCategory: (id: string) => void
+  onRestoreDefault: (id: string) => CategoryResult
+  onResetToDefaults: () => void
   calendars: GoogleCalendarListEntry[]
   disabledCalendars: string[]
   onDisableCalendar: (id: string) => void
@@ -31,10 +29,6 @@ interface FilterPanelProps {
   isCalendarsLoading: boolean
   calendarError: string | null
   onRetryCalendars: () => void
-  customCategories: CustomCategory[]
-  onAddCustomCategory: (input: CustomCategoryInput) => CustomCategoryResult
-  onUpdateCustomCategory: (id: CustomCategoryId, input: CustomCategoryInput) => CustomCategoryResult
-  onRemoveCustomCategory: (id: CustomCategoryId) => void
   isOpen: boolean
   onClose: () => void
   showTimedEvents: boolean
@@ -47,10 +41,13 @@ export function FilterPanel({
   filters,
   onAddFilter,
   onRemoveFilter,
-  builtInCategories,
-  disabledBuiltInCategories,
-  onDisableBuiltInCategory,
-  onEnableBuiltInCategory,
+  categories,
+  removedDefaults,
+  onAddCategory,
+  onUpdateCategory,
+  onRemoveCategory,
+  onRestoreDefault,
+  onResetToDefaults,
   calendars,
   disabledCalendars,
   onDisableCalendar,
@@ -58,10 +55,6 @@ export function FilterPanel({
   isCalendarsLoading,
   calendarError,
   onRetryCalendars,
-  customCategories,
-  onAddCustomCategory,
-  onUpdateCustomCategory,
-  onRemoveCustomCategory,
   isOpen,
   onClose,
   showTimedEvents,
@@ -70,15 +63,11 @@ export function FilterPanel({
   onSetMatchDescription,
 }: FilterPanelProps) {
   const [newPattern, setNewPattern] = useState('')
-  const [customResetToken, setCustomResetToken] = useState(0)
+  const [categoryResetToken, setCategoryResetToken] = useState(0)
   const [activeTab, setActiveTab] = useState<SettingsTab>('hidden')
   const hiddenTabRef = useRef<HTMLButtonElement | null>(null)
   const calendarsTabRef = useRef<HTMLButtonElement | null>(null)
   const categoriesTabRef = useRef<HTMLButtonElement | null>(null)
-  const disabledBuiltInSet = useMemo(
-    () => new Set(disabledBuiltInCategories),
-    [disabledBuiltInCategories]
-  )
   const disabledCalendarSet = useMemo(() => new Set(disabledCalendars), [disabledCalendars])
   const visibleCalendarCount = calendars.filter(
     (calendar) => !disabledCalendarSet.has(calendar.id)
@@ -97,7 +86,7 @@ export function FilterPanel({
 
   const handleClose = () => {
     setNewPattern('')
-    setCustomResetToken((prev) => prev + 1)
+    setCategoryResetToken((prev) => prev + 1)
     setActiveTab('hidden')
     onClose()
   }
@@ -360,59 +349,15 @@ export function FilterPanel({
               aria-hidden={activeTab !== 'categories'}
               hidden={activeTab !== 'categories'}
             >
-              <div className="rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2.5">
-                <div>
-                  <h3 className="text-sm font-semibold text-zinc-900">Built-in categories</h3>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Remove built-ins to keep them out of matching and the legend.
-                  </p>
-                </div>
-                <ul className="mt-2 space-y-1.5">
-                  {builtInCategories.map((category) => {
-                    const isDisabled = disabledBuiltInSet.has(category.category)
-                    return (
-                      <li
-                        key={category.category}
-                        className="flex items-center justify-between rounded-lg border border-zinc-100 bg-white px-3 py-1.5"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="h-3 w-3 rounded-sm"
-                            style={{ backgroundColor: category.color }}
-                          />
-                          <span
-                            className={
-                              isDisabled
-                                ? 'text-xs text-zinc-400 line-through'
-                                : 'text-xs text-zinc-700'
-                            }
-                          >
-                            {category.label}
-                          </span>
-                        </div>
-                        <Button
-                          plain
-                          onClick={() =>
-                            isDisabled
-                              ? onEnableBuiltInCategory(category.category)
-                              : onDisableBuiltInCategory(category.category)
-                          }
-                          className={secondaryActionClasses}
-                        >
-                          {isDisabled ? 'Restore' : 'Remove'}
-                        </Button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-
-              <CustomCategoryManager
-                key={customResetToken}
-                customCategories={customCategories}
-                onAddCustomCategory={onAddCustomCategory}
-                onUpdateCustomCategory={onUpdateCustomCategory}
-                onRemoveCustomCategory={onRemoveCustomCategory}
+              <CategoryManager
+                key={categoryResetToken}
+                categories={categories}
+                removedDefaults={removedDefaults}
+                onAddCategory={onAddCategory}
+                onUpdateCategory={onUpdateCategory}
+                onRemoveCategory={onRemoveCategory}
+                onRestoreDefault={onRestoreDefault}
+                onResetToDefaults={onResetToDefaults}
               />
             </div>
           </div>

@@ -1,13 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import App from './App'
 import { useCalendarEvents } from './hooks/useCalendarEvents'
 import { useCalendarList } from './hooks/useCalendarList'
 import { useCalendarVisibility } from './hooks/useCalendarVisibility'
-import { useCustomCategories } from './hooks/useCustomCategories'
+import { useCategories } from './hooks/useCategories'
 import { useAuth } from './hooks/useAuth'
-import { useBuiltInCategories } from './hooks/useBuiltInCategories'
 import { useFilters } from './hooks/useFilters'
+import { DEFAULT_CATEGORIES } from './config/categories'
+import type { Category } from './types/categories'
 import type { EventCategory } from './types/calendar'
 
 vi.mock('./hooks/useAuth', () => ({
@@ -22,11 +23,8 @@ vi.mock('./hooks/useCalendarList', () => ({
 vi.mock('./hooks/useCalendarVisibility', () => ({
   useCalendarVisibility: vi.fn(),
 }))
-vi.mock('./hooks/useCustomCategories', () => ({
-  useCustomCategories: vi.fn(),
-}))
-vi.mock('./hooks/useBuiltInCategories', () => ({
-  useBuiltInCategories: vi.fn(),
+vi.mock('./hooks/useCategories', () => ({
+  useCategories: vi.fn(),
 }))
 vi.mock('./hooks/useFilters', () => ({
   useFilters: vi.fn(),
@@ -36,9 +34,18 @@ const useAuthMock = vi.mocked(useAuth)
 const useCalendarEventsMock = vi.mocked(useCalendarEvents)
 const useCalendarListMock = vi.mocked(useCalendarList)
 const useCalendarVisibilityMock = vi.mocked(useCalendarVisibility)
-const useCustomCategoriesMock = vi.mocked(useCustomCategories)
-const useBuiltInCategoriesMock = vi.mocked(useBuiltInCategories)
+const useCategoriesMock = vi.mocked(useCategories)
 const useFiltersMock = vi.mocked(useFilters)
+
+// Build default categories for mocking
+const buildDefaultCategories = (): Category[] => {
+  const now = Date.now()
+  return DEFAULT_CATEGORIES.map((cat) => ({
+    ...cat,
+    createdAt: now,
+    updatedAt: now,
+  }))
+}
 
 const TEST_YEAR = 2026
 
@@ -94,20 +101,18 @@ beforeEach(() => {
   useCalendarEventsMock.mockReset()
   useCalendarListMock.mockReset()
   useCalendarVisibilityMock.mockReset()
-  useCustomCategoriesMock.mockReset()
-  useBuiltInCategoriesMock.mockReset()
+  useCategoriesMock.mockReset()
   useFiltersMock.mockReset()
   localStorage.clear()
-  useCustomCategoriesMock.mockReturnValue({
-    customCategories: [],
-    addCustomCategory: vi.fn(),
-    updateCustomCategory: vi.fn(),
-    removeCustomCategory: vi.fn(),
-  })
-  useBuiltInCategoriesMock.mockReturnValue({
-    disabledBuiltInCategories: [],
-    disableBuiltInCategory: vi.fn(),
-    enableBuiltInCategory: vi.fn(),
+  useCategoriesMock.mockReturnValue({
+    categories: buildDefaultCategories(),
+    allCategories: buildDefaultCategories(),
+    removedDefaults: [],
+    addCategory: vi.fn(),
+    updateCategory: vi.fn(),
+    removeCategory: vi.fn(),
+    restoreDefault: vi.fn(),
+    resetToDefaults: vi.fn(),
   })
   useCalendarListMock.mockReturnValue({
     calendars: [],

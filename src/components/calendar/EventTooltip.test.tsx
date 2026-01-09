@@ -1,5 +1,6 @@
 import { act, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getCategories } from '../../services/categories'
 import { getAllCategories } from '../../utils/categorize'
 import { EventTooltip } from './EventTooltip'
 
@@ -43,9 +44,16 @@ class ResizeObserverNoopMock {
   disconnect() {}
 }
 
+beforeEach(() => {
+  localStorage.clear()
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
+
+// Helper to get categories initialized with defaults
+const getCategoriesWithDefaults = () => getAllCategories(getCategories())
 
 describe('EventTooltip', () => {
   it('renders event details and link', () => {
@@ -60,7 +68,7 @@ describe('EventTooltip', () => {
           location: 'Boulder, CO',
         }}
         position={{ x: 1000, y: 1000 }}
-        categories={getAllCategories()}
+        categories={getCategoriesWithDefaults()}
       />
     )
 
@@ -96,7 +104,7 @@ describe('EventTooltip', () => {
           googleLink: '',
         }}
         position={{ x: 16, y: 16 }}
-        categories={getAllCategories()}
+        categories={getCategoriesWithDefaults()}
       />
     )
 
@@ -113,7 +121,7 @@ describe('EventTooltip', () => {
       <EventTooltip
         event={baseEvent}
         position={{ x: 20, y: 30 }}
-        categories={getAllCategories()}
+        categories={getCategoriesWithDefaults()}
       />
     )
 
@@ -130,7 +138,7 @@ describe('EventTooltip', () => {
       <EventTooltip
         event={baseEvent}
         position={{ x: 20, y: 30 }}
-        categories={getAllCategories()}
+        categories={getCategoriesWithDefaults()}
         onHideEvent={onHideEvent}
       />
     )

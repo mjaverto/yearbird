@@ -209,7 +209,7 @@ export function YearGrid({
           position={tooltip.position}
           categories={categories}
           onMouseEnter={cancelHideTooltip}
-          onMouseLeave={() => scheduleHideTooltip(undefined, { lockHover: false })}
+          onMouseLeave={scheduleHideTooltip}
           onFocus={cancelHideTooltip}
           onBlur={hideTooltip}
           onHideEvent={

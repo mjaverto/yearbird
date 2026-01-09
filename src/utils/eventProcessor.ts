@@ -1,5 +1,7 @@
-import { categorizeEvent } from './categorize'
+import { categorizeEvent, getCategoryMatchList } from './categorize'
+import { getCategories } from '../services/categories'
 import type { GoogleCalendarEvent, YearbirdEvent } from '../types/calendar'
+import type { CategoryConfig } from '../types/categories'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -81,9 +83,17 @@ const calculateDurationDays = (
   return Math.max(1, daySpan + 1)
 }
 
+/**
+ * Get the default category match list from localStorage.
+ * Used when no explicit matchList is provided.
+ */
+const getDefaultMatchList = (): CategoryConfig[] =>
+  getCategoryMatchList(getCategories())
+
 export function processEvent(
   event: GoogleCalendarEvent,
-  calendarId?: string
+  calendarId?: string,
+  matchList?: CategoryConfig[]
 ): YearbirdEvent | null {
   if (event.status === 'cancelled') {
     return null
@@ -138,7 +148,8 @@ export function processEvent(
   const title = event.summary?.trim() || 'Untitled event'
   const description = event.description?.trim()
   const location = event.location?.trim()
-  const { category, color } = categorizeEvent(title)
+  const effectiveMatchList = matchList ?? getDefaultMatchList()
+  const { category, color } = categorizeEvent(title, effectiveMatchList)
 
   const resolvedId = calendarId ? `${calendarId}:${event.id}` : event.id
 
@@ -162,9 +173,12 @@ export function processEvent(
 
 export function processEvents(
   events: GoogleCalendarEvent[],
-  calendarId?: string
+  calendarId?: string,
+  matchList?: CategoryConfig[]
 ): YearbirdEvent[] {
+  // Get match list once for consistency across all events
+  const effectiveMatchList = matchList ?? getDefaultMatchList()
   return events
-    .map((event) => processEvent(event, calendarId))
+    .map((event) => processEvent(event, calendarId, effectiveMatchList))
     .filter((event): event is YearbirdEvent => Boolean(event))
 }

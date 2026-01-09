@@ -36,18 +36,16 @@ export interface CalendarListResponse {
   nextPageToken?: string
 }
 
-export type BuiltInCategory =
-  | 'work'
-  | 'races'
-  | 'birthdays'
-  | 'holidays'
-  | 'adventures'
-  | 'family'
-  | 'uncategorized'
+/**
+ * Category identifiers - now unified as simple strings.
+ * Default categories use simple IDs like 'work', 'birthdays'.
+ * User-created categories use 'custom-{uuid}' format.
+ */
+export type EventCategory = string
 
-export type CustomCategoryId = `custom-${string}`
-
-export type EventCategory = BuiltInCategory | CustomCategoryId
+// Legacy type aliases for backward compatibility during migration
+export type BuiltInCategory = string
+export type CustomCategoryId = string
 
 /**
  * Processed calendar event for display in Yearbird.

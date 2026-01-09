@@ -96,6 +96,22 @@ test.describe('marketing snapshots (1280)', () => {
   })
 })
 
+// Open Graph / Social sharing images (1200x630 - standard OG ratio 1.91:1)
+test.describe('og social images', () => {
+  test.use({ viewport: { width: 1200, height: 630 } })
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await waitForFixtures(page)
+  })
+
+  test('og-image', async ({ page }) => {
+    await expect(page.locator('#root')).toHaveScreenshot('og-image.png', {
+      animations: 'disabled',
+    })
+  })
+})
+
 // Marketing screenshots at 1920x1080 for high-res displays
 test.describe('marketing snapshots (1920)', () => {
   test.use({ viewport: { width: 1920, height: 1080 } })

@@ -14,6 +14,7 @@
     "test:watch": "vitest --watch",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
+    "og:update": "playwright test --update-snapshots --grep 'og-image' && cp e2e/layout.spec.ts-snapshots/og-image-darwin.png public/marketing/og-image.png",
     "audit": "npm audit --audit-level=high"
   },
   "dependencies": {

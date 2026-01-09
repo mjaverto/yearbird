@@ -145,4 +145,149 @@ describe('categorizeEvent', () => {
     const matchList = getCategoryMatchList([a, b, c])
     expect(matchList.map((c) => c.label)).toEqual(['Apple', 'Mango', 'Zebra'])
   })
+
+  it('does not match categories with empty keywords', () => {
+    const emptyKeywords = createCategory('custom-1', 'Empty', [])
+    const matchList = getCategoryMatchList([emptyKeywords])
+
+    expect(categorizeEvent('anything', matchList)).toEqual({
+      category: 'uncategorized',
+      color: '#9CA3AF',
+    })
+  })
+
+  it('uses default match mode when matchMode is undefined', () => {
+    // Directly construct a CategoryConfig without matchMode to test null coalescing
+    const categoryWithoutMatchMode = {
+      category: 'test',
+      color: '#FF0000',
+      keywords: ['test'],
+      label: 'Test',
+      // matchMode intentionally omitted
+    }
+
+    const result = categorizeEvent('this is a test', [categoryWithoutMatchMode])
+    expect(result.category).toBe('test')
+  })
+
+  describe('description matching', () => {
+    it('does not match description when matchDescription is false', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
+      // Use a title that doesn't match any category
+      const result = categorizeEvent('Random event xyz', matchList, {
+        description: "John's birthday party planning",
+        matchDescription: false,
+      })
+
+      expect(result.category).toBe('uncategorized')
+    })
+
+    it('does not match description when matchDescription is undefined', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
+      // Use a title that doesn't match any category
+      const result = categorizeEvent('Random event xyz', matchList, {
+        description: "John's birthday party planning",
+      })
+
+      expect(result.category).toBe('uncategorized')
+    })
+
+    it('matches category from description when matchDescription is true', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Team sync', matchList, {
+        description: "Celebrating John's birthday at the office",
+        matchDescription: true,
+      })
+
+      expect(result.category).toBe('birthdays')
+    })
+
+    it('prioritizes title match over description match', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Birthday party', matchList, {
+        description: 'Weekly team meeting notes',
+        matchDescription: true,
+      })
+
+      // Title matches 'birthday' first, so should be birthdays, not work
+      expect(result.category).toBe('birthdays')
+    })
+
+    it('handles empty description gracefully', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Random event', matchList, {
+        description: '',
+        matchDescription: true,
+      })
+
+      expect(result.category).toBe('uncategorized')
+    })
+
+    it('handles undefined description gracefully', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Random event', matchList, {
+        matchDescription: true,
+      })
+
+      expect(result.category).toBe('uncategorized')
+    })
+
+    it('is case insensitive for description matching', () => {
+      const matchList = getCategoryMatchList(defaultCategories)
+      const result = categorizeEvent('Random sync', matchList, {
+        description: 'BIRTHDAY CELEBRATION',
+        matchDescription: true,
+      })
+
+      expect(result.category).toBe('birthdays')
+    })
+
+    it('works with custom categories and description matching', () => {
+      const custom = {
+        id: 'custom-1',
+        label: 'Celebrations',
+        color: '#FF0000',
+        keywords: ['celebrate', 'party'],
+        matchMode: 'any' as const,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      const categories = getCategoryMatchList([custom])
+
+      const result = categorizeEvent('Weekly sync', categories, {
+        description: 'Celebrate the team wins!',
+        matchDescription: true,
+      })
+
+      expect(result.category).toBe('custom-1')
+      expect(result.color).toBe('#FF0000')
+    })
+
+    it('respects matchMode in description matching', () => {
+      const custom = {
+        id: 'custom-1',
+        label: 'Yoga Classes',
+        color: '#00FF00',
+        keywords: ['yoga', 'studio'],
+        matchMode: 'all' as const,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      const categories = getCategoryMatchList([custom])
+
+      // Description has 'yoga' but not 'studio' - should NOT match with 'all' mode
+      const result1 = categorizeEvent('Random xyz', categories, {
+        description: 'Yoga session at home',
+        matchDescription: true,
+      })
+      expect(result1.category).toBe('uncategorized')
+
+      // Description has both 'yoga' and 'studio' - should match
+      const result2 = categorizeEvent('Random xyz', categories, {
+        description: 'Yoga at the studio downtown',
+        matchDescription: true,
+      })
+      expect(result2.category).toBe('custom-1')
+    })
+  })
 })

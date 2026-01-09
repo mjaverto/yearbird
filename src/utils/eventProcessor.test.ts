@@ -90,7 +90,7 @@ describe('processEvent', () => {
     expect(result?.durationDays).toBe(2)
   })
 
-  it('filters out single-day timed events', () => {
+  it('includes single-day timed events with isSingleDayTimed flag', () => {
     const event: GoogleCalendarEvent = {
       id: '4',
       summary: 'Meeting',
@@ -102,7 +102,11 @@ describe('processEvent', () => {
 
     const result = processEvent(event)
 
-    expect(result).toBeNull()
+    expect(result).not.toBeNull()
+    expect(result?.isAllDay).toBe(false)
+    expect(result?.isMultiDay).toBe(false)
+    expect(result?.isSingleDayTimed).toBe(true)
+    expect(result?.durationDays).toBe(1)
   })
 
   it('filters out cancelled events', () => {
@@ -119,7 +123,7 @@ describe('processEvent', () => {
 })
 
 describe('processEvents', () => {
-  it('filters cancelled and single-day timed events', () => {
+  it('filters cancelled events but keeps single-day timed events', () => {
     const events = processEvents([
       {
         id: '1',
@@ -147,9 +151,13 @@ describe('processEvents', () => {
       },
     ])
 
-    expect(events).toHaveLength(1)
-    expect(events[0]?.id).toBe('3')
-    expect(events[0]?.isMultiDay).toBe(true)
+    expect(events).toHaveLength(2)
+    // Single-day timed event is kept with isSingleDayTimed flag
+    expect(events[0]?.id).toBe('2')
+    expect(events[0]?.isSingleDayTimed).toBe(true)
+    // Multi-day event is also kept
+    expect(events[1]?.id).toBe('3')
+    expect(events[1]?.isMultiDay).toBe(true)
   })
 
   it('filters out null results', () => {

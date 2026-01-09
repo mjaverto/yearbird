@@ -46,6 +46,10 @@ const setup = async (overrides: Partial<FilterPanelProps> = {}) => {
     onRetryCalendars: vi.fn(),
     isOpen: true,
     onClose: vi.fn(),
+    showTimedEvents: false,
+    onSetShowTimedEvents: vi.fn(),
+    matchDescription: false,
+    onSetMatchDescription: vi.fn(),
     ...overrides,
   }
 
@@ -387,5 +391,70 @@ describe('FilterPanel', () => {
       fireEvent.click(screen.getByText('Restore'))
     })
     expect(onRestoreDefault).toHaveBeenCalledWith('work')
+  })
+
+  describe('Display Settings', () => {
+    it('renders display settings section with both toggles', async () => {
+      // Use showTimedEvents: true to avoid duplicate text (label + sr-only enabledLabel)
+      await setup({ showTimedEvents: true })
+
+      expect(screen.getByText('Display Settings')).toBeInTheDocument()
+      expect(screen.getByText('Show timed events')).toBeInTheDocument()
+      expect(screen.getByText('Match descriptions')).toBeInTheDocument()
+    })
+
+    it('calls onSetShowTimedEvents when timed events toggle is clicked', async () => {
+      const onSetShowTimedEvents = vi.fn()
+      // Use showTimedEvents: true so sr-only text is "Hide timed events" (unique)
+      await setup({ showTimedEvents: true, onSetShowTimedEvents })
+
+      const switches = screen.getAllByRole('switch')
+      const timedEventsSwitch = switches.find(
+        (s) => s.textContent?.includes('timed events')
+      )
+
+      await act(async () => {
+        fireEvent.click(timedEventsSwitch!)
+      })
+
+      expect(onSetShowTimedEvents).toHaveBeenCalledWith(false)
+    })
+
+    it('calls onSetMatchDescription when match descriptions toggle is clicked', async () => {
+      const onSetMatchDescription = vi.fn()
+      await setup({ matchDescription: false, onSetMatchDescription })
+
+      const switches = screen.getAllByRole('switch')
+      const matchDescSwitch = switches.find(
+        (s) => s.textContent?.includes('description matching')
+      )
+
+      await act(async () => {
+        fireEvent.click(matchDescSwitch!)
+      })
+
+      expect(onSetMatchDescription).toHaveBeenCalledWith(true)
+    })
+
+    it('shows correct toggle states based on props', async () => {
+      await setup({ showTimedEvents: true, matchDescription: true })
+
+      const switches = screen.getAllByRole('switch')
+      // Display settings switches should be checked (CloudSyncToggle state varies)
+      const checkedCount = switches.filter((s) => s.getAttribute('aria-checked') === 'true').length
+      expect(checkedCount).toBeGreaterThanOrEqual(2)
+    })
+
+    it('shows unchecked states when settings are disabled', async () => {
+      await setup({ showTimedEvents: false, matchDescription: false })
+
+      const switches = screen.getAllByRole('switch')
+      // Find switches by their sr-only text content
+      const timedEventsSwitch = switches.find((s) => s.textContent?.includes('timed events'))
+      const descriptionSwitch = switches.find((s) => s.textContent?.includes('description'))
+
+      expect(timedEventsSwitch).toHaveAttribute('aria-checked', 'false')
+      expect(descriptionSwitch).toHaveAttribute('aria-checked', 'false')
+    })
   })
 })

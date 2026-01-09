@@ -16,6 +16,13 @@ import { useCalendarVisibility } from './hooks/useCalendarVisibility'
 import { useAuth } from './hooks/useAuth'
 import { useCategories } from './hooks/useCategories'
 import { useFilters } from './hooks/useFilters'
+import {
+  getMatchDescription,
+  getShowTimedEvents,
+  setMatchDescription as saveMatchDescription,
+  setShowTimedEvents as saveShowTimedEvents,
+} from './services/displaySettings'
+import { scheduleSyncToCloud } from './services/syncManager'
 import type { EventCategory } from './types/calendar'
 import { categorizeEvent, getAllCategories, getCategoryMatchList } from './utils/categorize'
 import { resolveCalendarId, type CalendarMeta } from './utils/calendarUtils'
@@ -113,6 +120,8 @@ function App() {
   const [selectedYear, setSelectedYear] = useState(currentYear)
   const [isMonthScrollEnabled, setIsMonthScrollEnabled] = useState(() => loadScrollEnabled())
   const [monthScrollDensity, setMonthScrollDensity] = useState(() => loadScrollDensity())
+  const [showTimedEvents, setShowTimedEvents] = useState(() => getShowTimedEvents())
+  const [matchDescription, setMatchDescription] = useState(() => getMatchDescription())
   const {
     calendars,
     isLoading: isCalendarsLoading,
@@ -187,7 +196,10 @@ function App() {
     }
 
     return events.map((event) => {
-      const { category, color } = categorizeEvent(event.title, categoryMatchList)
+      const { category, color } = categorizeEvent(event.title, categoryMatchList, {
+        description: event.description,
+        matchDescription,
+      })
       const resolvedCalendarId = resolveCalendarId(event, calendarMetaById)
       const calendarMeta = resolvedCalendarId ? calendarMetaById.get(resolvedCalendarId) : undefined
       const calendarName = calendarMeta?.name ?? event.calendarName ?? resolvedCalendarId
@@ -210,15 +222,21 @@ function App() {
         calendarColor,
       }
     })
-  }, [events, categoryMatchList, calendarMetaById])
+  }, [events, categoryMatchList, calendarMetaById, matchDescription])
   const visibleEvents = useMemo(() => {
-    const filteredByTitle = filterEvents(categorizedEvents)
+    let filtered = filterEvents(categorizedEvents)
+
+    // Filter single-day timed events unless showTimedEvents is enabled
+    if (!showTimedEvents) {
+      filtered = filtered.filter((event) => !event.isSingleDayTimed)
+    }
+
     if (resolvedHiddenCategories.length === 0) {
-      return filteredByTitle
+      return filtered
     }
     const hiddenSet = new Set(resolvedHiddenCategories)
-    return filteredByTitle.filter((event) => !hiddenSet.has(event.category))
-  }, [categorizedEvents, filterEvents, resolvedHiddenCategories])
+    return filtered.filter((event) => !hiddenSet.has(event.category))
+  }, [categorizedEvents, filterEvents, resolvedHiddenCategories, showTimedEvents])
   useEffect(() => {
     try {
       if (resolvedHiddenCategories.length === 0) {
@@ -284,6 +302,18 @@ function App() {
       const isHidden = cleanPrev.includes(category)
       return isHidden ? cleanPrev.filter((entry) => entry !== category) : [...cleanPrev, category]
     })
+  }
+
+  const handleSetShowTimedEvents = (value: boolean) => {
+    setShowTimedEvents(value)
+    saveShowTimedEvents(value)
+    scheduleSyncToCloud()
+  }
+
+  const handleSetMatchDescription = (value: boolean) => {
+    setMatchDescription(value)
+    saveMatchDescription(value)
+    scheduleSyncToCloud()
   }
 
   const headerToolbar = (
@@ -399,6 +429,10 @@ function App() {
         onRetryCalendars={refetchCalendars}
         isOpen={showFilters}
         onClose={() => setShowFilters(false)}
+        showTimedEvents={showTimedEvents}
+        onSetShowTimedEvents={handleSetShowTimedEvents}
+        matchDescription={matchDescription}
+        onSetMatchDescription={handleSetMatchDescription}
       />
     </AuthenticatedLayout>
   )

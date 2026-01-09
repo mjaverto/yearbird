@@ -143,9 +143,7 @@ export function processEvent(
   }
 
   const isMultiDay = durationDays > 1
-  if (!isAllDay && !isMultiDay) {
-    return null
-  }
+  const isSingleDayTimed = !isAllDay && !isMultiDay
 
   const title = event.summary?.trim() || 'Untitled event'
   const description = event.description?.trim()
@@ -164,6 +162,7 @@ export function processEvent(
     endDate,
     isAllDay,
     isMultiDay,
+    isSingleDayTimed,
     durationDays,
     googleLink: event.htmlLink || '',
     category,

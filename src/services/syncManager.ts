@@ -22,6 +22,12 @@ import { readCloudConfig, writeCloudConfig, checkDriveAccess, deleteCloudConfig 
 import { getFilters } from './filters'
 import { getDisabledCalendars } from './calendarVisibility'
 import { getCategories } from './categories'
+import {
+  getShowTimedEvents,
+  setShowTimedEvents,
+  getMatchDescription,
+  setMatchDescription,
+} from './displaySettings'
 
 const SYNC_SETTINGS_KEY = 'yearbird:cloud-sync-settings'
 /**
@@ -213,6 +219,8 @@ export function buildCloudConfigFromLocal(): CloudConfigV2 {
     filters: getFilters(),
     disabledCalendars: getDisabledCalendars(),
     categories: cloudCategories,
+    showTimedEvents: getShowTimedEvents(),
+    matchDescription: getMatchDescription(),
   }
 }
 
@@ -333,6 +341,14 @@ export function mergeConfigs(
     }
   }
 
+  // Display settings - last-write-wins
+  const showTimedEvents = remoteIsNewer
+    ? remote.showTimedEvents
+    : local.showTimedEvents
+  const matchDescription = remoteIsNewer
+    ? remote.matchDescription
+    : local.matchDescription
+
   return {
     version: 2,
     updatedAt: Date.now(),
@@ -340,6 +356,8 @@ export function mergeConfigs(
     filters,
     disabledCalendars,
     categories: Array.from(categoryMap.values()),
+    showTimedEvents,
+    matchDescription,
   }
 }
 
@@ -387,6 +405,14 @@ export function applyCloudConfigToLocal(config: CloudConfig): void {
     // Clean up legacy keys (they will be migrated on next read if needed)
     localStorage.removeItem('yearbird:disabled-built-in-categories')
     localStorage.removeItem('yearbird:custom-categories')
+
+    // Write display settings
+    if (config.showTimedEvents !== undefined) {
+      setShowTimedEvents(config.showTimedEvents)
+    }
+    if (config.matchDescription !== undefined) {
+      setMatchDescription(config.matchDescription)
+    }
 
     // Update sync settings
     const settings = getSyncSettings()

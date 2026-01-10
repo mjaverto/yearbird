@@ -3,7 +3,6 @@
 **FIRST ACTION (before responding to user):**
 1. Run `echo $HOME` to get home path
 2. Read `$HOME/agents.md`
-3. Follow the chain it points to
 
 **SECOND ACTION:**
 4. Read `./docs/agents.md` for repo-specific context

@@ -128,6 +128,121 @@ const decisionCards = [
   },
 ]
 
+/*
+ * ⚠️ FAQ CONTENT DUPLICATED: Keep in sync with index.html fallback content
+ * If you update these FAQ items, you MUST also update the corresponding
+ * content in index.html for SEO crawlers.
+ */
+interface FaqItem {
+  id: string
+  question: string
+  answer: React.ReactNode
+}
+
+const faqItems: FaqItem[] = [
+  {
+    id: 'what-data',
+    question: 'What data does Yearbird access?',
+    answer:
+      'Yearbird requests read-only access to your Google Calendar through the Google Calendar API. This includes your calendar events, their titles, dates, times, and associated calendars. We use the calendar.readonly scope, which means Yearbird can only view your calendar data—it cannot create, modify, or delete any events.',
+  },
+  {
+    id: 'data-storage',
+    question: 'Where is my calendar data stored?',
+    answer:
+      'Your calendar data is never stored on our servers. Yearbird is a client-side application, which means all data processing happens entirely in your web browser. When you sign in, your browser communicates directly with Google\'s servers to fetch your calendar data. We have no servers that receive, store, or process your personal information.',
+  },
+  {
+    id: 'modify-calendar',
+    question: 'Can Yearbird modify my calendar?',
+    answer:
+      'No. Yearbird only requests read-only access to your Google Calendar. This is enforced by Google\'s permission system—we literally cannot create, edit, or delete your calendar events. Yearbird is designed purely for visualization and planning, not calendar management.',
+  },
+  {
+    id: 'revoke-access',
+    question: 'How do I revoke Yearbird\'s access?',
+    answer: (
+      <>
+        You can revoke Yearbird&apos;s access at any time by visiting your{' '}
+        <a
+          href="https://myaccount.google.com/permissions"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-emerald-600 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-700"
+        >
+          Google Account permissions
+        </a>
+        . Find Yearbird in the list of connected apps and click &ldquo;Remove Access.&rdquo; Since we don&apos;t store any of your data, revoking access immediately ends Yearbird&apos;s ability to view your calendar.
+      </>
+    ),
+  },
+  {
+    id: 'open-source',
+    question: 'Is Yearbird open source?',
+    answer: (
+      <>
+        Yes! Yearbird is fully open source under the MIT License. You can inspect the complete source code on{' '}
+        <a
+          href="https://github.com/mjaverto/yearbird"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-emerald-600 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-700"
+        >
+          GitHub
+        </a>
+        {' '}to verify our privacy claims, self-host your own instance for complete control, or contribute improvements. Transparency is core to our approach.
+      </>
+    ),
+  },
+]
+
+interface FaqAccordionItemProps {
+  item: FaqItem
+  isOpen: boolean
+  onToggle: () => void
+}
+
+function FaqAccordionItem({ item, isOpen, onToggle }: FaqAccordionItemProps) {
+  return (
+    <div className="border-b border-zinc-200 last:border-b-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        id={`faq-question-${item.id}`}
+        className="flex w-full items-center justify-between py-5 text-left transition hover:text-emerald-700"
+        aria-expanded={isOpen}
+        aria-controls={`faq-answer-${item.id}`}
+      >
+        <span className="pr-4 text-base font-medium text-zinc-900">{item.question}</span>
+        <svg
+          className={`h-5 w-5 flex-shrink-0 text-zinc-400 transition-transform duration-200 ${
+            isOpen ? 'rotate-180' : ''
+          }`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      <div
+        id={`faq-answer-${item.id}`}
+        role="region"
+        aria-labelledby={`faq-question-${item.id}`}
+        hidden={!isOpen}
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+          isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="overflow-hidden">
+          <p className="pb-5 text-sm leading-relaxed text-zinc-600">{item.answer}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface OriginRect {
   top: number
   left: number
@@ -565,6 +680,7 @@ export function LandingPage({
 }: LandingPageProps) {
   const { openShot, lightbox } = useScreenshotLightbox()
   const prefersReducedMotion = usePrefersReducedMotion()
+  const [openFaqId, setOpenFaqId] = useState<string | null>(null)
 
   // Determine if we should show TV mode UI
   // Show when: explicitly in TV mode, or when GIS is unavailable
@@ -891,6 +1007,32 @@ export function LandingPage({
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        {/* FAQ Section */}
+        <section id="faq" className="mx-auto w-full max-w-3xl px-6 pb-32">
+          <div className="text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-600">
+              Frequently asked questions
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold text-zinc-900 sm:text-4xl font-display">
+              Privacy &amp; data access
+            </h2>
+            <p className="mt-3 text-base text-zinc-600">
+              Everything you need to know about how Yearbird handles your Google Calendar data.
+            </p>
+          </div>
+
+          <div className="mt-10 rounded-2xl border border-white/70 bg-white/80 px-6 shadow-sm">
+            {faqItems.map((item) => (
+              <FaqAccordionItem
+                key={item.id}
+                item={item}
+                isOpen={openFaqId === item.id}
+                onToggle={() => setOpenFaqId(openFaqId === item.id ? null : item.id)}
+              />
+            ))}
           </div>
         </section>
       </main>

@@ -36,18 +36,74 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
     />
     <title>Yearbird - Plan a year worth winning</title>
+
+    <!-- FAQ Structured Data for Google Rich Results -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What data does Yearbird access?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yearbird requests read-only access to your Google Calendar through the Google Calendar API. This includes your calendar events, their titles, dates, times, and associated calendars. We use the calendar.readonly scope, which means Yearbird can only view your calendar data—it cannot create, modify, or delete any events."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Where is my calendar data stored?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Your calendar data is never stored on our servers. Yearbird is a client-side application, which means all data processing happens entirely in your web browser. When you sign in, your browser communicates directly with Google's servers to fetch your calendar data. We have no servers that receive, store, or process your personal information."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can Yearbird modify my calendar?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Yearbird only requests read-only access to your Google Calendar. This is enforced by Google's permission system—we literally cannot create, edit, or delete your calendar events. Yearbird is designed purely for visualization and planning, not calendar management."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I revoke Yearbird's access?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "You can revoke Yearbird's access at any time by visiting your Google Account permissions at myaccount.google.com/permissions. Find Yearbird in the list of connected apps and click 'Remove Access.' Since we don't store any of your data, revoking access immediately ends Yearbird's ability to view your calendar."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is Yearbird open source?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes! Yearbird is fully open source under the MIT License. You can inspect the complete source code on GitHub to verify our privacy claims, self-host your own instance for complete control, or contribute improvements. Transparency is core to our approach."
+          }
+        }
+      ]
+    }
+    </script>
+
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <!-- Prevent FOUC: hide fallback content immediately when JS available -->
     <script>document.documentElement.classList.add('js')</script>
     <style>.js [data-fallback] { display: none; }</style>
   </head>
   <body class="m-0 p-0">
-    <!-- Pre-render content for crawlers - React replaces this on hydration -->
+    <!--
+      Pre-render content for crawlers - React replaces this on hydration.
+      ⚠️ FAQ CONTENT DUPLICATED: Keep in sync with src/components/LandingPage.tsx faqItems array.
+      If you update FAQ content here, you MUST also update the corresponding content in LandingPage.tsx.
+    -->
     <div id="root">
       <div data-fallback style="max-width: 800px; margin: 0 auto; padding: 40px 20px; font-family: system-ui, sans-serif;">
         <h1>Yearbird</h1>
         <p><strong>Plan a year worth winning.</strong></p>
         <p>Yearbird is a calendar visualization app that turns your Google Calendar into a giant year-at-a-glance map with 365 days on one bold screen. It is built for founders, athletes, creators, students, and anyone chasing an ambitious year who wants to stay focused and in control.</p>
+
         <h2>What Yearbird Does</h2>
         <ul>
           <li>Displays your entire year of Google Calendar events in one view</li>
@@ -56,9 +112,37 @@
           <li>Privacy-first: Your data never leaves your browser</li>
           <li>Open source under the MIT License</li>
         </ul>
-        <h2>Privacy</h2>
+
+        <h2>Google Calendar Data Access</h2>
+        <p>Yearbird uses Google OAuth to securely connect to your Google Calendar. Here's how we handle your data:</p>
+        <ul>
+          <li><strong>Read-only access:</strong> We request the calendar.readonly scope, which means Yearbird can only view your calendar data—it cannot create, modify, or delete any events.</li>
+          <li><strong>Client-side processing:</strong> All calendar data is processed entirely in your web browser. Your data never touches our servers.</li>
+          <li><strong>No data storage:</strong> We do not collect, store, or have access to your personal calendar information.</li>
+          <li><strong>Direct Google connection:</strong> Your browser communicates directly with Google's servers to fetch calendar data.</li>
+        </ul>
+
+        <h2>Frequently Asked Questions</h2>
+
+        <h3>What data does Yearbird access?</h3>
+        <p>Yearbird requests read-only access to your Google Calendar through the Google Calendar API. This includes your calendar events, their titles, dates, times, and associated calendars. We use the calendar.readonly scope, which means Yearbird can only view your calendar data—it cannot create, modify, or delete any events.</p>
+
+        <h3>Where is my calendar data stored?</h3>
+        <p>Your calendar data is never stored on our servers. Yearbird is a client-side application, which means all data processing happens entirely in your web browser. When you sign in, your browser communicates directly with Google's servers to fetch your calendar data. We have no servers that receive, store, or process your personal information.</p>
+
+        <h3>Can Yearbird modify my calendar?</h3>
+        <p>No. Yearbird only requests read-only access to your Google Calendar. This is enforced by Google's permission system—we literally cannot create, edit, or delete your calendar events. Yearbird is designed purely for visualization and planning, not calendar management.</p>
+
+        <h3>How do I revoke Yearbird's access?</h3>
+        <p>You can revoke Yearbird's access at any time by visiting your Google Account permissions at myaccount.google.com/permissions. Find Yearbird in the list of connected apps and click "Remove Access." Since we don't store any of your data, revoking access immediately ends Yearbird's ability to view your calendar.</p>
+
+        <h3>Is Yearbird open source?</h3>
+        <p>Yes! Yearbird is fully open source under the MIT License. You can inspect the complete source code on GitHub to verify our privacy claims, self-host your own instance for complete control, or contribute improvements. Transparency is core to our approach.</p>
+
+        <h2>Privacy &amp; Legal</h2>
         <p>Yearbird is a client-side application. Your calendar data is processed entirely in your browser and never sent to our servers. We don't collect, store, or have access to your personal data.</p>
-        <p><a href="/privacy.html">Privacy Policy</a> | <a href="/terms.html">Terms of Service</a></p>
+        <p><a href="/privacy.html">Privacy Policy</a> | <a href="/terms.html">Terms of Service</a> | <a href="https://github.com/mjaverto/yearbird">View Source on GitHub</a></p>
+
         <noscript><p>Please enable JavaScript to use Yearbird.</p></noscript>
       </div>
     </div>

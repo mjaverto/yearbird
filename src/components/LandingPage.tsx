@@ -764,37 +764,7 @@ export function LandingPage({
               control.
             </p>
 
-            {/* App features summary - shown prominently for Google verification */}
-            <div className="mx-auto mt-8 grid max-w-2xl grid-cols-2 gap-4 text-left sm:grid-cols-4">
-              <div className="rounded-xl bg-white/60 px-4 py-3 text-center">
-                <p className="text-2xl font-semibold text-emerald-600">365</p>
-                <p className="text-xs text-zinc-500">Days at a glance</p>
-              </div>
-              <div className="rounded-xl bg-white/60 px-4 py-3 text-center">
-                <p className="text-2xl font-semibold text-sky-600">100%</p>
-                <p className="text-xs text-zinc-500">Client-side</p>
-              </div>
-              <div className="rounded-xl bg-white/60 px-4 py-3 text-center">
-                <p className="text-2xl font-semibold text-amber-600">0</p>
-                <p className="text-xs text-zinc-500">Data on servers</p>
-              </div>
-              <div className="rounded-xl bg-white/60 px-4 py-3 text-center">
-                <p className="text-2xl font-semibold text-violet-600">MIT</p>
-                <p className="text-xs text-zinc-500">Open source</p>
-              </div>
-            </div>
-
-            <a
-              href="#features"
-              className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-zinc-500 transition hover:text-zinc-700"
-            >
-              See how it works
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </a>
-
-            <div className="mt-6 flex flex-col items-center gap-5">
+            <div className="mt-10 flex flex-col items-center gap-5">
               {/* Show auth notice, but not GIS unavailable message when TV mode is active */}
               {authNotice && !(showTvMode && isGisUnavailable) ? (
                 <div
@@ -828,22 +798,6 @@ export function LandingPage({
                   ) : null}
                 </div>
               ) : null}
-              {/* Explicit data usage disclosure for Google verification */}
-              <div className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white/60 px-5 py-4 text-left text-sm text-zinc-600">
-                <p className="font-medium text-zinc-800">How Yearbird uses your Google data:</p>
-                <ul className="mt-2 space-y-1 text-xs">
-                  <li>• Requests <strong>read-only</strong> access to your Google Calendar</li>
-                  <li>• Displays your events in a year-at-a-glance view</li>
-                  <li>• <strong>Cannot</strong> modify, delete, or create calendar events</li>
-                  <li>• All data stays in your browser — never sent to any server</li>
-                </ul>
-                <p className="mt-2 text-xs">
-                  <a href="/privacy.html" className="text-emerald-600 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-700">
-                    Read our Privacy Policy
-                  </a>
-                </p>
-              </div>
-
               <button
                 type="button"
                 onClick={handleSignIn}

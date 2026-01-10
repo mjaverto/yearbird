@@ -1,5 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Mock the logger module so we can spy on log.error across module resets
+const mockLogError = vi.fn()
+vi.mock('../utils/logger', () => ({
+  log: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: mockLogError,
+    debug: vi.fn(),
+  },
+}))
+
 type GoogleStub = {
   accounts: {
     oauth2: {
@@ -20,8 +31,9 @@ const loadAuth = async () => {
 
 describe('auth service', () => {
   beforeEach(() => {
-    localStorage.clear()
+    sessionStorage.clear()
     globalWithGoogle.google = undefined
+    mockLogError.mockClear()
   })
 
   it('reports whether a client id is configured', async () => {
@@ -63,7 +75,7 @@ describe('auth service', () => {
     auth.storeAuth('token', 120, testScopes)
 
     expect(auth.getGrantedScopes()).toBe(testScopes)
-    expect(localStorage.getItem('yearbird:grantedScopes')).toBe(testScopes)
+    expect(sessionStorage.getItem('yearbird:grantedScopes')).toBe(testScopes)
   })
 
   it('does not store scopes when not provided', async () => {
@@ -71,7 +83,7 @@ describe('auth service', () => {
     auth.storeAuth('token', 120)
 
     expect(auth.getGrantedScopes()).toBeNull()
-    expect(localStorage.getItem('yearbird:grantedScopes')).toBeNull()
+    expect(sessionStorage.getItem('yearbird:grantedScopes')).toBeNull()
   })
 
   it('hasDriveScope returns true when drive.appdata scope is granted', async () => {
@@ -101,11 +113,11 @@ describe('auth service', () => {
     const auth = await loadAuth()
     const expiresAt = Date.now() - 1000
 
-    localStorage.setItem('yearbird:accessToken', 'token')
-    localStorage.setItem('yearbird:expiresAt', expiresAt.toString())
+    sessionStorage.setItem('yearbird:accessToken', 'token')
+    sessionStorage.setItem('yearbird:expiresAt', expiresAt.toString())
 
     expect(auth.getStoredAuth()).toBeNull()
-    expect(localStorage.getItem('yearbird:accessToken')).toBeNull()
+    expect(sessionStorage.getItem('yearbird:accessToken')).toBeNull()
   })
 
   it('signs in using the token client', async () => {
@@ -171,28 +183,28 @@ describe('auth service', () => {
 
     const auth = await loadAuth()
 
-    localStorage.setItem('yearbird:accessToken', 'token')
-    localStorage.setItem('yearbird:expiresAt', String(Date.now() + 60_000))
+    sessionStorage.setItem('yearbird:accessToken', 'token')
+    sessionStorage.setItem('yearbird:expiresAt', String(Date.now() + 60_000))
 
     auth.signOut()
 
     expect(revoke).toHaveBeenCalled()
-    expect(localStorage.getItem('yearbird:accessToken')).toBeNull()
-    // Note: event caches are no longer stored in localStorage (caching disabled)
+    expect(sessionStorage.getItem('yearbird:accessToken')).toBeNull()
+    // Note: event caches are no longer stored in sessionStorage (caching disabled)
   })
 
   it('clears stored auth explicitly including scopes', async () => {
     const auth = await loadAuth()
 
-    localStorage.setItem('yearbird:accessToken', 'token')
-    localStorage.setItem('yearbird:expiresAt', String(Date.now() + 60_000))
-    localStorage.setItem('yearbird:grantedScopes', 'https://www.googleapis.com/auth/calendar.readonly')
+    sessionStorage.setItem('yearbird:accessToken', 'token')
+    sessionStorage.setItem('yearbird:expiresAt', String(Date.now() + 60_000))
+    sessionStorage.setItem('yearbird:grantedScopes', 'https://www.googleapis.com/auth/calendar.readonly')
 
     auth.clearStoredAuth()
 
-    expect(localStorage.getItem('yearbird:accessToken')).toBeNull()
-    expect(localStorage.getItem('yearbird:grantedScopes')).toBeNull()
-    // Note: event caches are no longer stored in localStorage (caching disabled)
+    expect(sessionStorage.getItem('yearbird:accessToken')).toBeNull()
+    expect(sessionStorage.getItem('yearbird:grantedScopes')).toBeNull()
+    // Note: event caches are no longer stored in sessionStorage (caching disabled)
   })
 
   it('signIn returns unavailable when not initialized', async () => {
@@ -205,19 +217,19 @@ describe('auth service', () => {
     expect(result).toBe('unavailable')
   })
 
-  it('getGrantedScopes handles localStorage errors gracefully', async () => {
+  it('getGrantedScopes handles sessionStorage errors gracefully', async () => {
     const auth = await loadAuth()
 
-    // Mock localStorage.getItem to throw an error
-    const originalGetItem = localStorage.getItem
-    localStorage.getItem = vi.fn(() => {
+    // Mock sessionStorage.getItem to throw an error
+    const originalGetItem = sessionStorage.getItem
+    sessionStorage.getItem = vi.fn(() => {
       throw new Error('Storage access denied')
     })
 
     const result = auth.getGrantedScopes()
 
     expect(result).toBeNull()
-    localStorage.getItem = originalGetItem
+    sessionStorage.getItem = originalGetItem
   })
 
   it('clearSignInPopup clears state correctly', async () => {
@@ -403,7 +415,6 @@ describe('auth service', () => {
       }
 
       const auth = await loadAuth()
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const resultPromise = auth.requestDriveScope()
 
       // Simulate error response
@@ -414,8 +425,7 @@ describe('auth service', () => {
 
       const result = await resultPromise
       expect(result).toBe(false)
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Drive scope request failed:', 'access_denied')
-      consoleErrorSpy.mockRestore()
+      expect(mockLogError).toHaveBeenCalledWith('Drive scope request failed:', 'access_denied')
     })
 
     it('returns false when error_callback is invoked', async () => {
@@ -438,7 +448,6 @@ describe('auth service', () => {
       }
 
       const auth = await loadAuth()
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const resultPromise = auth.requestDriveScope()
 
       // Simulate error callback (e.g., popup closed)
@@ -447,8 +456,7 @@ describe('auth service', () => {
 
       const result = await resultPromise
       expect(result).toBe(false)
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Drive scope request error:', { type: 'popup_closed' })
-      consoleErrorSpy.mockRestore()
+      expect(mockLogError).toHaveBeenCalledWith('Drive scope request error:', { type: 'popup_closed' })
     })
 
     it('calls successHandler when set and scope granted', async () => {

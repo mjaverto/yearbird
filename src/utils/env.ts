@@ -1,4 +1,5 @@
 import { parseDateValue } from './dateUtils'
+import { log } from './logger'
 
 const FIXTURE_MODE = import.meta.env.VITE_USE_FIXTURE_EVENTS === 'true'
 const FIXED_DATE_VALUE = import.meta.env.VITE_FIXED_DATE
@@ -13,7 +14,7 @@ export const isFixtureMode = () => {
     return true
   }
 
-  console.warn('Fixture mode is disabled outside dev/test builds.')
+  log.warn('Fixture mode is disabled outside dev/test builds.')
   return false
 }
 

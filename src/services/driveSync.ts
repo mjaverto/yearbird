@@ -18,6 +18,7 @@ import type {
   CloudCustomCategory,
   EventFilter,
 } from '../types/cloudConfig'
+import { log } from '../utils/logger'
 import { getStoredAuth } from './auth'
 
 /** Maximum allowed length for string fields to prevent abuse */
@@ -39,7 +40,7 @@ function validateCloudConfig(data: unknown): CloudConfig | null {
 
   // Validate version
   if (config.version !== 1 && config.version !== 2) {
-    console.warn('Invalid cloud config version:', config.version)
+    log.warn('Invalid cloud config version:', config.version)
     return null
   }
 
@@ -298,7 +299,7 @@ async function driveRequest<T>(
       // Retry transient errors with exponential backoff
       if (isRetryableError(errorCode) && retryCount < MAX_RETRIES) {
         const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount)
-        console.warn(`Drive API error ${errorCode}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
+        log.warn(`Drive API error ${errorCode}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
         await sleep(delay)
         return driveRequest<T>(url, options, retryCount + 1)
       }
@@ -322,7 +323,7 @@ async function driveRequest<T>(
     // Retry network errors with exponential backoff
     if (retryCount < MAX_RETRIES) {
       const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount)
-      console.warn(`Network error, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
+      log.warn(`Network error, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`)
       await sleep(delay)
       return driveRequest<T>(url, options, retryCount + 1)
     }

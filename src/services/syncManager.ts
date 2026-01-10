@@ -16,6 +16,7 @@ import type {
   CloudSyncSettings,
   SyncStatus,
 } from '../types/cloudConfig'
+import { log } from '../utils/logger'
 import { DEFAULT_CATEGORIES } from '../config/categories'
 import { hasDriveScope } from './auth'
 import { readCloudConfig, writeCloudConfig, checkDriveAccess, deleteCloudConfig } from './driveSync'
@@ -79,7 +80,8 @@ export function getSyncSettings(): CloudSyncSettings {
       lastSyncedAt: parsed.lastSyncedAt ?? null,
       deviceId: parsed.deviceId || generateDeviceId(),
     }
-  } catch {
+  } catch (error) {
+    log.debug('Storage access error reading sync settings:', error)
     return {
       enabled: false,
       lastSyncedAt: null,
@@ -94,8 +96,8 @@ export function getSyncSettings(): CloudSyncSettings {
 export function saveSyncSettings(settings: CloudSyncSettings): void {
   try {
     localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(settings))
-  } catch {
-    // Ignore storage errors
+  } catch (error) {
+    log.debug('Storage access error saving sync settings:', error)
   }
 }
 
@@ -105,7 +107,8 @@ export function saveSyncSettings(settings: CloudSyncSettings): void {
 export function isExplicitlyDisabled(): boolean {
   try {
     return localStorage.getItem(SYNC_DISABLED_KEY) === 'true'
-  } catch {
+  } catch (error) {
+    log.debug('Storage access error checking sync disabled:', error)
     return false
   }
 }
@@ -505,8 +508,8 @@ export async function enableSync(): Promise<boolean> {
   // Clear the explicitly disabled flag
   try {
     localStorage.removeItem(SYNC_DISABLED_KEY)
-  } catch {
-    // Ignore storage errors
+  } catch (error) {
+    log.debug('Storage access error enabling sync:', error)
   }
 
   // Perform initial sync
@@ -522,8 +525,8 @@ export async function enableSync(): Promise<boolean> {
 export function disableSync(): void {
   try {
     localStorage.setItem(SYNC_DISABLED_KEY, 'true')
-  } catch {
-    // Ignore storage errors
+  } catch (error) {
+    log.debug('Storage access error disabling sync:', error)
   }
 
   const settings = getSyncSettings()
@@ -662,7 +665,7 @@ async function performDebouncedWrite(): Promise<void> {
 
     if (!writeResult.success) {
       lastSyncError = writeResult.error?.message || 'Failed to sync'
-      console.warn('Cloud sync failed:', lastSyncError)
+      log.warn('Cloud sync failed:', lastSyncError)
     } else {
       lastSyncError = null
       const settings = getSyncSettings()

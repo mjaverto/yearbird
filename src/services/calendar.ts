@@ -5,6 +5,7 @@ import type {
   GoogleCalendarListEntry,
 } from '../types/calendar'
 import { isFixtureMode } from '../utils/env'
+import { log } from '../utils/logger'
 import { getFixtureCalendars, getFixtureEventsForYear } from './calendarFixtures'
 
 const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3'
@@ -30,7 +31,8 @@ type FetchCalendarsOptions = {
 const getLocalTimeZone = () => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone ?? DEFAULT_TIMEZONE
-  } catch {
+  } catch (error) {
+    log.debug('Timezone detection error:', error)
     return DEFAULT_TIMEZONE
   }
 }

@@ -13,6 +13,8 @@
  * - PlayStation/Xbox browsers
  */
 
+import { log } from './logger'
+
 const TV_MODE_STORAGE_KEY = 'yearbird:tvMode'
 
 /**
@@ -80,8 +82,8 @@ export function getTvModePreference(): boolean {
 
   try {
     return localStorage.getItem(TV_MODE_STORAGE_KEY) === 'true'
-  } catch {
-    // localStorage may be unavailable in private mode
+  } catch (error) {
+    log.debug('Storage access error reading TV mode preference:', error)
     return false
   }
 }
@@ -102,8 +104,8 @@ export function setTvModePreference(enabled: boolean): void {
     } else {
       localStorage.removeItem(TV_MODE_STORAGE_KEY)
     }
-  } catch {
-    // Ignore storage access issues
+  } catch (error) {
+    log.debug('Storage access error saving TV mode preference:', error)
   }
 }
 

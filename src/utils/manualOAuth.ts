@@ -15,6 +15,8 @@
  * @see https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow
  */
 
+import { log } from './logger'
+
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const OAUTH_STATE_KEY = 'yearbird:oauthState'
 
@@ -47,8 +49,8 @@ function generateState(): string {
 function storeOAuthState(state: string): void {
   try {
     sessionStorage.setItem(OAUTH_STATE_KEY, state)
-  } catch {
-    // sessionStorage may be unavailable
+  } catch (error) {
+    log.debug('Storage access error storing OAuth state:', error)
   }
 }
 
@@ -61,7 +63,8 @@ function consumeOAuthState(): string | null {
     const state = sessionStorage.getItem(OAUTH_STATE_KEY)
     sessionStorage.removeItem(OAUTH_STATE_KEY)
     return state
-  } catch {
+  } catch (error) {
+    log.debug('Storage access error consuming OAuth state:', error)
     return null
   }
 }
@@ -133,7 +136,7 @@ export function extractTokenFromHash(): TokenData | null {
   const storedState = consumeOAuthState()
   if (returnedState && storedState && returnedState !== storedState) {
     // State mismatch - possible CSRF attack, reject the token
-    console.warn('OAuth state mismatch - possible CSRF attack')
+    log.warn('OAuth state mismatch - possible CSRF attack')
     return null
   }
 

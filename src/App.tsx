@@ -28,6 +28,7 @@ import type { EventCategory, YearbirdEvent } from './types/calendar'
 import { categorizeEvent, getAllCategories, getCategoryMatchList } from './utils/categorize'
 import { resolveCalendarId, type CalendarMeta } from './utils/calendarUtils'
 import { getFixedDate } from './utils/env'
+import { log } from './utils/logger'
 
 const HIDDEN_CATEGORIES_KEY = 'yearbird:hidden-categories'
 const SCROLL_ENABLED_KEY = 'yearbird:month-scroll-enabled'
@@ -52,11 +53,12 @@ const loadHiddenCategories = (knownCategories: Set<string>): EventCategory[] => 
       (category): category is EventCategory =>
         typeof category === 'string' && knownCategories.has(category)
     )
-  } catch {
+  } catch (error) {
+    log.debug('Parse error loading hidden categories:', error)
     try {
       localStorage.removeItem(HIDDEN_CATEGORIES_KEY)
-    } catch {
-      // Ignore storage access errors (e.g. private browsing restrictions).
+    } catch (removeError) {
+      log.debug('Storage access error removing hidden categories:', removeError)
     }
     return []
   }
@@ -75,7 +77,8 @@ const loadScrollEnabled = () => {
       return false
     }
     return stored === 'true'
-  } catch {
+  } catch (error) {
+    log.debug('Storage access error loading scroll enabled:', error)
     return false
   }
 }
@@ -95,7 +98,8 @@ const loadScrollDensity = () => {
       return DEFAULT_SCROLL_DENSITY
     }
     return clampScrollDensity(parsed)
-  } catch {
+  } catch (error) {
+    log.debug('Storage access error loading scroll density:', error)
     return DEFAULT_SCROLL_DENSITY
   }
 }
@@ -265,8 +269,8 @@ function App() {
         return
       }
       localStorage.setItem(HIDDEN_CATEGORIES_KEY, JSON.stringify(resolvedHiddenCategories))
-    } catch {
-      // Ignore storage access errors (e.g. private browsing restrictions).
+    } catch (error) {
+      log.debug('Storage access error saving hidden categories:', error)
     }
   }, [resolvedHiddenCategories])
 
@@ -276,8 +280,8 @@ function App() {
     }
     try {
       localStorage.setItem(SCROLL_ENABLED_KEY, isMonthScrollEnabled.toString())
-    } catch {
-      // Ignore storage access errors (e.g. private browsing restrictions).
+    } catch (error) {
+      log.debug('Storage access error saving scroll enabled:', error)
     }
   }, [isMonthScrollEnabled])
 
@@ -287,8 +291,8 @@ function App() {
     }
     try {
       localStorage.setItem(SCROLL_DENSITY_KEY, clampScrollDensity(monthScrollDensity).toString())
-    } catch {
-      // Ignore storage access errors (e.g. private browsing restrictions).
+    } catch (error) {
+      log.debug('Storage access error saving scroll density:', error)
     }
   }, [monthScrollDensity])
 

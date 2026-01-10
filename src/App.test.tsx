@@ -115,7 +115,7 @@ beforeEach(() => {
     resetToDefaults: vi.fn(),
   })
   useCalendarListMock.mockReturnValue({
-    calendars: [],
+    calendars: [{ id: 'primary', summary: 'Test Calendar', primary: true }],
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -351,10 +351,12 @@ test('allows hiding events from the event bars', async () => {
 
   render(<App />)
 
-  fireEvent.mouseEnter(screen.getByRole('button', { name: 'A' }), {
+  // Click event bar to show tooltip
+  fireEvent.click(screen.getByRole('button', { name: 'A' }), {
     clientX: 140,
     clientY: 90,
   })
+  // Wait for tooltip and click hide button
   fireEvent.click(await screen.findByRole('button', { name: /hide events like a/i }))
   expect(addFilter).toHaveBeenCalledWith('A')
 })

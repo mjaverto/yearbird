@@ -304,15 +304,17 @@ describe('YearGrid', () => {
       />
     )
 
-    fireEvent.mouseEnter(screen.getByRole('button', { name: /rent payment/i }), {
+    // Click event bar to show tooltip
+    fireEvent.click(screen.getByRole('button', { name: /rent payment/i }), {
       clientX: 120,
       clientY: 80,
     })
+    // Wait for tooltip and click hide button
     fireEvent.click(await screen.findByRole('button', { name: /hide events like rent payment/i }))
     expect(onHideEvent).toHaveBeenCalledWith('Rent Payment')
   })
 
-  it('hides single-day events via tooltip action', async () => {
+  it('hides single-day events via tooltip action in scrollable mode', async () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverMock)
     const onHideEvent = vi.fn()
     const events = [
@@ -325,19 +327,24 @@ describe('YearGrid', () => {
       }),
     ]
 
-    const { container } = render(
+    render(
       <YearGrid
         year={2025}
         events={events}
         today={new Date(2025, 0, 1)}
         onHideEvent={onHideEvent}
         categories={getAllCategories()}
+        isScrollable={true}
+        scrollDensity={60}
       />
     )
 
-    const dayCell = container.querySelector('[data-date="2025-02-10"]')
-    expect(dayCell).not.toBeNull()
-    fireEvent.mouseEnter(dayCell as HTMLElement, { clientX: 160, clientY: 100 })
+    // In scrollable mode, click the event item to show tooltip
+    const eventItem = screen.getByRole('button', { name: 'Doctor' })
+    expect(eventItem).not.toBeNull()
+    fireEvent.click(eventItem, { clientX: 160, clientY: 100 })
+
+    // Wait for tooltip and click hide button
     fireEvent.click(await screen.findByRole('button', { name: /hide events like doctor/i }))
     expect(onHideEvent).toHaveBeenCalledWith('Doctor')
   })

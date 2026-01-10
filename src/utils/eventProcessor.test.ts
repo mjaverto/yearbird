@@ -109,6 +109,65 @@ describe('processEvent', () => {
     expect(result?.durationDays).toBe(1)
   })
 
+  it('extracts time fields for timed events', () => {
+    // Use explicit timezone to avoid local timezone issues in tests
+    const event: GoogleCalendarEvent = {
+      id: '5',
+      summary: 'Team Standup',
+      start: { dateTime: '2025-01-15T09:30:00Z', timeZone: 'UTC' },
+      end: { dateTime: '2025-01-15T10:00:00Z', timeZone: 'UTC' },
+      status: 'confirmed',
+      htmlLink: 'https://example.com',
+    }
+
+    const result = processEvent(event)
+
+    expect(result).not.toBeNull()
+    expect(result?.startTime).toBe('09:30')
+    expect(result?.endTime).toBe('10:00')
+    expect(result?.startTimeMinutes).toBe(9 * 60 + 30) // 570
+    expect(result?.endTimeMinutes).toBe(10 * 60) // 600
+  })
+
+  it('respects timezone when extracting time fields', () => {
+    // 15:00 UTC = 10:00 EST (America/New_York)
+    const event: GoogleCalendarEvent = {
+      id: '6',
+      summary: 'NYC Meeting',
+      start: {
+        dateTime: '2025-01-15T15:00:00Z',
+        timeZone: 'America/New_York',
+      },
+      end: {
+        dateTime: '2025-01-15T16:00:00Z',
+        timeZone: 'America/New_York',
+      },
+      status: 'confirmed',
+      htmlLink: 'https://example.com',
+    }
+
+    const result = processEvent(event)
+
+    expect(result).not.toBeNull()
+    // In America/New_York (EST, -5), 15:00 UTC = 10:00 local
+    expect(result?.startTime).toBe('10:00')
+    expect(result?.endTime).toBe('11:00')
+    expect(result?.startTimeMinutes).toBe(10 * 60) // 600
+    expect(result?.endTimeMinutes).toBe(11 * 60) // 660
+  })
+
+  it('does not include time fields for all-day events', () => {
+    const event = buildAllDayEvent()
+
+    const result = processEvent(event)
+
+    expect(result).not.toBeNull()
+    expect(result?.startTime).toBeUndefined()
+    expect(result?.endTime).toBeUndefined()
+    expect(result?.startTimeMinutes).toBeUndefined()
+    expect(result?.endTimeMinutes).toBeUndefined()
+  })
+
   it('filters out cancelled events', () => {
     const event = buildAllDayEvent({ status: 'cancelled' })
 

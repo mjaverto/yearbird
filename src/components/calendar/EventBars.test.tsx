@@ -34,7 +34,7 @@ describe('EventBars', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('adds hit slop classes for easier hover targets', () => {
+  it('adds hit slop classes for easier click targets', () => {
     const bar = buildBar()
 
     render(<EventBars bars={[bar]} />)
@@ -46,22 +46,11 @@ describe('EventBars', () => {
     )
   })
 
-  it('fires click, hover, and keyboard handlers', () => {
+  it('fires click handler with position on click and keyboard', () => {
     const onEventClick = vi.fn()
-    const onEventHover = vi.fn()
-    const onEventMove = vi.fn()
-    const onEventLeave = vi.fn()
     const bar = buildBar()
 
-    render(
-      <EventBars
-        bars={[bar]}
-        onEventClick={onEventClick}
-        onEventHover={onEventHover}
-        onEventMove={onEventMove}
-        onEventLeave={onEventLeave}
-      />
-    )
+    render(<EventBars bars={[bar]} onEventClick={onEventClick} />)
 
     const element = screen.getByRole('button', { name: 'Trip' })
     vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({
@@ -75,20 +64,36 @@ describe('EventBars', () => {
       y: 100,
       toJSON: () => ({}),
     } as DOMRect)
-    fireEvent.mouseEnter(element, { clientX: 10, clientY: 20 })
-    fireEvent.mouseMove(element, { clientX: 12, clientY: 24 })
-    fireEvent.mouseLeave(element)
-    fireEvent.focus(element)
-    fireEvent.blur(element)
-    fireEvent.click(element)
-    fireEvent.keyDown(element, { key: 'Enter' })
-    fireEvent.keyDown(element, { key: ' ' })
 
-    expect(onEventHover).toHaveBeenNthCalledWith(1, bar.event, { x: 10, y: 20 }, 'pointer')
-    expect(onEventHover).toHaveBeenNthCalledWith(2, bar.event, { x: 150, y: 120 }, 'focus')
-    expect(onEventMove).toHaveBeenCalledTimes(1)
-    expect(onEventLeave).toHaveBeenNthCalledWith(1, bar.event.id)
-    expect(onEventLeave).toHaveBeenNthCalledWith(2, bar.event.id)
+    // Click fires with mouse position
+    fireEvent.click(element, { clientX: 75, clientY: 110 })
+    expect(onEventClick).toHaveBeenNthCalledWith(1, bar.event, { x: 75, y: 110 })
+
+    // Focus alone does NOT fire (prevents double-trigger when clicking)
+    fireEvent.focus(element)
+    expect(onEventClick).toHaveBeenCalledTimes(1)
+
+    // Enter key fires with calculated center position
+    fireEvent.keyDown(element, { key: 'Enter' })
+    expect(onEventClick).toHaveBeenNthCalledWith(2, bar.event, { x: 150, y: 120 })
+
+    // Space key fires with calculated center position
+    fireEvent.keyDown(element, { key: ' ' })
+    expect(onEventClick).toHaveBeenNthCalledWith(3, bar.event, { x: 150, y: 120 })
+
     expect(onEventClick).toHaveBeenCalledTimes(3)
+  })
+
+  it('ignores non-activation keyboard events', () => {
+    const onEventClick = vi.fn()
+    const bar = buildBar()
+
+    render(<EventBars bars={[bar]} onEventClick={onEventClick} />)
+
+    const element = screen.getByRole('button', { name: 'Trip' })
+    fireEvent.keyDown(element, { key: 'Tab' })
+    fireEvent.keyDown(element, { key: 'Escape' })
+
+    expect(onEventClick).not.toHaveBeenCalled()
   })
 })

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AuthenticatedLayout } from './components/AuthenticatedLayout'
+import { CalendarLoadingScreen } from './components/CalendarLoadingScreen'
 import { ColorLegend } from './components/ColorLegend'
 import { FilterPanel } from './components/FilterPanel'
 import { SettingsIcon } from './components/icons/SettingsIcon'
@@ -23,7 +24,7 @@ import {
   setShowTimedEvents as saveShowTimedEvents,
 } from './services/displaySettings'
 import { scheduleSyncToCloud } from './services/syncManager'
-import type { EventCategory } from './types/calendar'
+import type { EventCategory, YearbirdEvent } from './types/calendar'
 import { categorizeEvent, getAllCategories, getCategoryMatchList } from './utils/categorize'
 import { resolveCalendarId, type CalendarMeta } from './utils/calendarUtils'
 import { getFixedDate } from './utils/env'
@@ -237,6 +238,26 @@ function App() {
     const hiddenSet = new Set(resolvedHiddenCategories)
     return filtered.filter((event) => !hiddenSet.has(event.category))
   }, [categorizedEvents, filterEvents, resolvedHiddenCategories, showTimedEvents])
+
+  // Timed events for popover (always available, regardless of showTimedEvents setting)
+  const timedEventsByDate = useMemo(() => {
+    const filtered = filterEvents(categorizedEvents)
+    const hiddenSet = new Set(resolvedHiddenCategories)
+    const map = new Map<string, YearbirdEvent[]>()
+
+    for (const event of filtered) {
+      if (!event.isSingleDayTimed) continue
+      if (hiddenSet.has(event.category)) continue
+
+      const dateKey = event.startDate
+      const existing = map.get(dateKey) ?? []
+      existing.push(event)
+      map.set(dateKey, existing)
+    }
+
+    return map
+  }, [categorizedEvents, filterEvents, resolvedHiddenCategories])
+
   useEffect(() => {
     try {
       if (resolvedHiddenCategories.length === 0) {
@@ -270,6 +291,73 @@ function App() {
       // Ignore storage access errors (e.g. private browsing restrictions).
     }
   }, [monthScrollDensity])
+
+  // Track whether initial calendar data has loaded
+  const hasInitialLoad = useRef(false)
+  // Once we start hiding, we commit to it (don't stop if data becomes unavailable during refetch)
+  const hasStartedHiding = useRef(false)
+  // Two-phase overlay: first fade out, then remove from DOM
+  const [showLoadingOverlay, setShowLoadingOverlay] = useState(true)
+  const [isHidingOverlay, setIsHidingOverlay] = useState(false)
+  // Track when YearGrid has fully rendered (all MonthRows measured by ResizeObserver)
+  const [isGridReady, setIsGridReady] = useState(false)
+
+  // Determine what we have to show the user
+  const hasCalendarData = calendars.length > 0
+  const hasEventsLoaded = !isLoading
+  const calendarsStillLoading = isCalendarsLoading
+  const hasError = calendarError != null || error != null
+  const hasCachedEvents = isFromCache && events.length > 0
+
+  // Data is ready when:
+  // 1. Calendar list has loaded (not still loading) - prevents race condition where
+  //    events refetch when calendar IDs change from ['primary'] to actual IDs
+  // 2. AND calendar data exists AND events have loaded
+  // 3. OR we have an error
+  // 4. OR we have cached events
+  const dataIsReady = (!calendarsStillLoading && hasCalendarData && hasEventsLoaded) || hasError || hasCachedEvents
+
+  // Track when data has become ready (for initial load detection)
+  useEffect(() => {
+    if (dataIsReady) {
+      hasInitialLoad.current = true
+    }
+  }, [dataIsReady])
+
+  // Called when YearGrid has finished rendering all months with correct dimensions
+  const handleGridReady = () => {
+    setIsGridReady(true)
+  }
+
+  // When data is ready AND grid has rendered, wait for stability then start fade
+  // The 150ms debounce prevents starting fade during brief "ready" states that occur
+  // between calendar list loading and events refetching with new calendar IDs
+  useEffect(() => {
+    // Once we've started hiding, don't do anything else
+    if (hasStartedHiding.current) return
+
+    if (dataIsReady && isGridReady && showLoadingOverlay && !isHidingOverlay) {
+      const startFade = () => {
+        // Double-check we're still ready (in case of race condition)
+        if (!hasStartedHiding.current) {
+          hasStartedHiding.current = true
+          setIsHidingOverlay(true)
+        }
+      }
+
+      // Wait 150ms for data to stabilize (prevents flash during refetch cascade)
+      const stabilityTimeout = setTimeout(() => {
+        requestAnimationFrame(startFade)
+      }, 150)
+
+      return () => clearTimeout(stabilityTimeout)
+    }
+  }, [dataIsReady, isGridReady, showLoadingOverlay, isHidingOverlay])
+
+  // Called when fade-out animation completes
+  const handleOverlayHidden = () => {
+    setShowLoadingOverlay(false)
+  }
 
   const showSpinner = !isReady && !authNotice && !isAuthenticated
   if (showSpinner) {
@@ -381,60 +469,68 @@ function App() {
   )
 
   return (
-    <AuthenticatedLayout
-      onSignOut={signOut}
-      onRefresh={handleRefresh}
-      isRefreshing={isLoading}
-      lastUpdated={lastUpdated}
-      isFromCache={isFromCache}
-      error={error}
-      toolbar={headerToolbar}
-    >
-      <div className="h-full w-full overflow-hidden p-3 sm:p-4">
-        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white">
-          <div
-            className={`min-h-0 flex-1 ${isMonthScrollEnabled ? 'overflow-y-auto overflow-x-hidden' : 'overflow-hidden'}`}
-          >
-            {isMonthScrollEnabled ? <DayHeader /> : null}
-            <YearGrid
-              year={selectedYear}
-              events={visibleEvents}
-              today={today}
-              onHideEvent={addFilter}
-              categories={categoryList}
-              isScrollable={isMonthScrollEnabled}
-              scrollDensity={monthScrollDensity}
-              showDayHeader={!isMonthScrollEnabled}
-            />
+    <>
+      <AuthenticatedLayout
+        onSignOut={signOut}
+        onRefresh={handleRefresh}
+        isRefreshing={isLoading}
+        lastUpdated={lastUpdated}
+        isFromCache={isFromCache}
+        error={error}
+        toolbar={headerToolbar}
+      >
+        <div className="h-full w-full overflow-hidden p-3 sm:p-4">
+          <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white">
+            <div
+              className={`min-h-0 flex-1 ${isMonthScrollEnabled ? 'overflow-y-auto overflow-x-hidden' : 'overflow-hidden'}`}
+            >
+              {isMonthScrollEnabled ? <DayHeader /> : null}
+              <YearGrid
+                year={selectedYear}
+                events={visibleEvents}
+                timedEventsByDate={timedEventsByDate}
+                today={today}
+                onHideEvent={addFilter}
+                categories={categoryList}
+                isScrollable={isMonthScrollEnabled}
+                scrollDensity={monthScrollDensity}
+                showDayHeader={!isMonthScrollEnabled}
+                onReady={handleGridReady}
+              />
+            </div>
           </div>
         </div>
-      </div>
-      <FilterPanel
-        filters={filters}
-        onAddFilter={addFilter}
-        onRemoveFilter={removeFilter}
-        categories={categories}
-        removedDefaults={removedDefaults}
-        onAddCategory={addCategory}
-        onUpdateCategory={updateCategory}
-        onRemoveCategory={removeCategory}
-        onRestoreDefault={restoreDefault}
-        onResetToDefaults={resetToDefaults}
-        calendars={calendars}
-        disabledCalendars={disabledCalendarIds}
-        onDisableCalendar={disableCalendar}
-        onEnableCalendar={enableCalendar}
-        isCalendarsLoading={isCalendarsLoading}
-        calendarError={calendarError}
-        onRetryCalendars={refetchCalendars}
-        isOpen={showFilters}
-        onClose={() => setShowFilters(false)}
-        showTimedEvents={showTimedEvents}
-        onSetShowTimedEvents={handleSetShowTimedEvents}
-        matchDescription={matchDescription}
-        onSetMatchDescription={handleSetMatchDescription}
-      />
-    </AuthenticatedLayout>
+        <FilterPanel
+          filters={filters}
+          onAddFilter={addFilter}
+          onRemoveFilter={removeFilter}
+          categories={categories}
+          removedDefaults={removedDefaults}
+          onAddCategory={addCategory}
+          onUpdateCategory={updateCategory}
+          onRemoveCategory={removeCategory}
+          onRestoreDefault={restoreDefault}
+          onResetToDefaults={resetToDefaults}
+          calendars={calendars}
+          disabledCalendars={disabledCalendarIds}
+          onDisableCalendar={disableCalendar}
+          onEnableCalendar={enableCalendar}
+          isCalendarsLoading={isCalendarsLoading}
+          calendarError={calendarError}
+          onRetryCalendars={refetchCalendars}
+          isOpen={showFilters}
+          onClose={() => setShowFilters(false)}
+          showTimedEvents={showTimedEvents}
+          onSetShowTimedEvents={handleSetShowTimedEvents}
+          matchDescription={matchDescription}
+          onSetMatchDescription={handleSetMatchDescription}
+        />
+      </AuthenticatedLayout>
+      {/* Loading overlay - fades out after content has painted */}
+      {showLoadingOverlay ? (
+        <CalendarLoadingScreen isHiding={isHidingOverlay} onHidden={handleOverlayHidden} />
+      ) : null}
+    </>
   )
 }
 

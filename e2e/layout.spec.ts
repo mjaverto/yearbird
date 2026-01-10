@@ -29,7 +29,7 @@ test.describe('layout snapshots (desktop)', () => {
 
   test('event tooltip', async ({ page }) => {
     const bar = page.getByRole('button', { name: 'Executive strategy review' }).first()
-    await bar.hover()
+    await bar.click()
     await expect(
       page.getByRole('tooltip', { name: 'Executive strategy review details' })
     ).toBeVisible()
@@ -76,7 +76,7 @@ test.describe('marketing snapshots (1280)', () => {
 
   test('event tooltip', async ({ page }) => {
     const bar = page.getByRole('button', { name: 'Executive strategy review' }).first()
-    await bar.hover()
+    await bar.click()
     await expect(
       page.getByRole('tooltip', { name: 'Executive strategy review details' })
     ).toBeVisible()
@@ -138,7 +138,7 @@ test.describe('marketing snapshots (1920)', () => {
 
   test('event tooltip', async ({ page }) => {
     const bar = page.getByRole('button', { name: 'Executive strategy review' }).first()
-    await bar.hover()
+    await bar.click()
     await expect(
       page.getByRole('tooltip', { name: 'Executive strategy review details' })
     ).toBeVisible()

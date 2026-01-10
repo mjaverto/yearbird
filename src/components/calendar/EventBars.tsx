@@ -1,4 +1,4 @@
-import type { FocusEvent, KeyboardEvent, MouseEvent } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import clsx from 'clsx'
 import type { EventBar } from '../../utils/eventBars'
 import type { YearbirdEvent } from '../../types/calendar'
@@ -103,11 +103,6 @@ function EventBarItem({
     }
   }
 
-  const handleFocus = (event: FocusEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    onClick({ x: rect.left + rect.width / 2, y: rect.top + rect.height })
-  }
-
   return (
     <div
       className="group pointer-events-auto absolute"
@@ -136,7 +131,6 @@ function EventBarItem({
         aria-label={bar.event.title}
         aria-describedby={describedBy}
         onClick={handleClick}
-        onFocus={handleFocus}
         onKeyDown={handleKeyDown}
       >
         <span className="truncate">{bar.event.title}</span>

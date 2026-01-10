@@ -46,7 +46,7 @@ describe('EventBars', () => {
     )
   })
 
-  it('fires click handler with position on click, focus, and keyboard', () => {
+  it('fires click handler with position on click and keyboard', () => {
     const onEventClick = vi.fn()
     const bar = buildBar()
 
@@ -69,19 +69,19 @@ describe('EventBars', () => {
     fireEvent.click(element, { clientX: 75, clientY: 110 })
     expect(onEventClick).toHaveBeenNthCalledWith(1, bar.event, { x: 75, y: 110 })
 
-    // Focus fires with calculated center position
+    // Focus alone does NOT fire (prevents double-trigger when clicking)
     fireEvent.focus(element)
-    expect(onEventClick).toHaveBeenNthCalledWith(2, bar.event, { x: 150, y: 120 })
+    expect(onEventClick).toHaveBeenCalledTimes(1)
 
     // Enter key fires with calculated center position
     fireEvent.keyDown(element, { key: 'Enter' })
-    expect(onEventClick).toHaveBeenNthCalledWith(3, bar.event, { x: 150, y: 120 })
+    expect(onEventClick).toHaveBeenNthCalledWith(2, bar.event, { x: 150, y: 120 })
 
     // Space key fires with calculated center position
     fireEvent.keyDown(element, { key: ' ' })
-    expect(onEventClick).toHaveBeenNthCalledWith(4, bar.event, { x: 150, y: 120 })
+    expect(onEventClick).toHaveBeenNthCalledWith(3, bar.event, { x: 150, y: 120 })
 
-    expect(onEventClick).toHaveBeenCalledTimes(4)
+    expect(onEventClick).toHaveBeenCalledTimes(3)
   })
 
   it('ignores non-activation keyboard events', () => {

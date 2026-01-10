@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 
 const STORAGE_KEY = 'yearbird:mobile-nudge-dismissed'
-const PHONE_MAX_WIDTH = 640 // phones only, not tablets
+// 640px matches Tailwind's `sm` breakpoint - phones are typically <640px,
+// tablets start around 768px. This targets phones only.
+const PHONE_MAX_WIDTH = 640
 
 /**
  * A dismissible bottom banner that nudges phone users toward desktop.

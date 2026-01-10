@@ -17,7 +17,7 @@ import {
   isWeekend,
   parseDateValue,
 } from '../../utils/dateUtils'
-import { buildGoogleCalendarCreateUrl } from '../../utils/googleCalendar'
+import { buildGoogleCalendarCreateUrl, buildGoogleCalendarDayUrl } from '../../utils/googleCalendar'
 import type { CategoryConfig } from '../../types/categories'
 import type { YearbirdEvent } from '../../types/calendar'
 import { useTooltip, type TooltipSource } from '../../hooks/useTooltip'
@@ -27,16 +27,21 @@ import { DayHeader } from './DayHeader'
 import { EventBars } from './EventBars'
 import { EventTooltip } from './EventTooltip'
 import { getEventTooltipId } from './eventTooltipUtils'
+import { DaySummaryPopover } from './DaySummaryPopover'
 
 interface YearGridProps {
   year: number
   events: YearbirdEvent[]
+  /** Timed events by date (YYYY-MM-DD) for showing in day popover */
+  timedEventsByDate?: Map<string, YearbirdEvent[]>
   today: Date
   onHideEvent?: (title: string) => void
   categories: CategoryConfig[]
   isScrollable?: boolean
   scrollDensity?: number
   showDayHeader?: boolean
+  /** Called when the grid has fully rendered with correct dimensions */
+  onReady?: () => void
 }
 
 const padDay = (value: number) => value.toString().padStart(2, '0')
@@ -79,6 +84,10 @@ const getEventRange = (event: YearbirdEvent) => {
   return { start, end }
 }
 
+/**
+ * Builds a map of single-day events by date key.
+ * Used for rendering dots on day cells (excludes multi-day events shown as bars).
+ */
 const buildSingleDayEventMap = (
   events: YearbirdEvent[],
   year: number,
@@ -128,23 +137,77 @@ const buildSingleDayEventMap = (
   return map
 }
 
+/**
+ * Builds a map of all-day and multi-day events by date key.
+ * Used for the popover to show all events touching a day (including multi-day spans).
+ */
+const buildAllDayEventMap = (
+  events: YearbirdEvent[],
+  year: number,
+  categoryPriority: Map<string, number>
+) => {
+  const map = new Map<string, YearbirdEvent[]>()
+  const sortedEvents = [...events].sort((a, b) => {
+    const priorityA = categoryPriority.get(a.category) ?? Number.MAX_SAFE_INTEGER
+    const priorityB = categoryPriority.get(b.category) ?? Number.MAX_SAFE_INTEGER
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB
+    }
+    if (a.durationDays !== b.durationDays) {
+      return b.durationDays - a.durationDays
+    }
+    if (a.startDate !== b.startDate) {
+      return a.startDate.localeCompare(b.startDate)
+    }
+    return a.title.localeCompare(b.title)
+  })
+
+  for (const event of sortedEvents) {
+    // Include all events (single-day and multi-day), but exclude timed events
+    if (event.isSingleDayTimed) {
+      continue
+    }
+
+    const range = getEventRange(event)
+    if (!range) {
+      continue
+    }
+
+    const current = new Date(range.start)
+    while (current <= range.end) {
+      if (current.getFullYear() === year) {
+        const key = getDateKey(year, current.getMonth() + 1, current.getDate())
+        const existing = map.get(key)
+        if (existing) {
+          existing.push(event)
+        } else {
+          map.set(key, [event])
+        }
+      }
+      current.setDate(current.getDate() + 1)
+    }
+  }
+
+  return map
+}
+
 export function YearGrid({
   year,
   events,
+  timedEventsByDate,
   today,
   onHideEvent,
   categories,
   isScrollable = false,
   scrollDensity = 60,
   showDayHeader = true,
+  onReady,
 }: YearGridProps) {
   const {
     tooltip,
+    tooltipRef,
     showTooltip,
-    updateTooltipPosition,
-    scheduleHideTooltip,
     hideTooltip,
-    cancelHideTooltip,
   } = useTooltip()
   const activeEventId = tooltip.event?.id
   const activeTooltipId = tooltip.event ? getEventTooltipId(tooltip.event.id) : undefined
@@ -154,6 +217,10 @@ export function YearGrid({
   )
   const singleDayEventsByDate = useMemo(
     () => buildSingleDayEventMap(events, year, categoryPriority),
+    [events, year, categoryPriority]
+  )
+  const allDayEventsByDate = useMemo(
+    () => buildAllDayEventMap(events, year, categoryPriority),
     [events, year, categoryPriority]
   )
   const eventBarsByMonth = useMemo(() => {
@@ -177,6 +244,18 @@ export function YearGrid({
       }
     : undefined
 
+  // Track when all 12 MonthRows have reported their dimensions via ResizeObserver
+  const readyMonthsRef = useRef(new Set<number>())
+  const hasSignaledReady = useRef(false)
+  const handleMonthReady = (monthIndex: number) => {
+    if (hasSignaledReady.current) return
+    readyMonthsRef.current.add(monthIndex)
+    if (readyMonthsRef.current.size === 12 && onReady) {
+      hasSignaledReady.current = true
+      onReady()
+    }
+  }
+
   return (
     <div className={clsx('flex w-full flex-col', isScrollable ? 'min-h-full' : 'h-full')}>
       {showDayHeader ? <DayHeader /> : null}
@@ -190,28 +269,27 @@ export function YearGrid({
             monthName={monthName}
             today={today}
             singleDayEventsByDate={singleDayEventsByDate}
+            allDayEventsByDate={allDayEventsByDate}
+            timedEventsByDate={timedEventsByDate}
             eventBars={eventBarsByMonth.get(monthIndex) ?? []}
+            categories={categories}
             onEventHover={showTooltip}
-            onEventMove={updateTooltipPosition}
-            onEventLeave={scheduleHideTooltip}
             activeEventId={activeEventId}
             activeTooltipId={activeTooltipId}
             isScrollable={isScrollable}
             scrollDensity={scrollDensity}
             className={monthRowClassName}
             style={monthRowStyle}
+            onReady={() => handleMonthReady(monthIndex)}
           />
         ))}
       </div>
       {tooltip.event ? (
         <EventTooltip
+          ref={tooltipRef}
           event={tooltip.event}
           position={tooltip.position}
           categories={categories}
-          onMouseEnter={cancelHideTooltip}
-          onMouseLeave={scheduleHideTooltip}
-          onFocus={cancelHideTooltip}
-          onBlur={hideTooltip}
           onHideEvent={
             onHideEvent
               ? (title) => {
@@ -233,16 +311,19 @@ interface MonthRowProps {
   monthName: string
   today: Date
   singleDayEventsByDate: Map<string, YearbirdEvent[]>
+  allDayEventsByDate: Map<string, YearbirdEvent[]>
+  timedEventsByDate?: Map<string, YearbirdEvent[]>
   eventBars: EventBar[]
+  categories: CategoryConfig[]
   onEventHover?: (event: YearbirdEvent, position: { x: number; y: number }, source?: TooltipSource) => void
-  onEventMove?: (position: { x: number; y: number }) => void
-  onEventLeave?: (eventId?: string) => void
   activeEventId?: string
   activeTooltipId?: string
   isScrollable?: boolean
   scrollDensity?: number
   className?: string
   style?: CSSProperties
+  /** Called when ResizeObserver has measured this row */
+  onReady?: () => void
 }
 
 function MonthRow({
@@ -251,24 +332,32 @@ function MonthRow({
   monthName,
   today,
   singleDayEventsByDate,
+  allDayEventsByDate,
+  timedEventsByDate,
   eventBars,
+  categories,
   onEventHover,
-  onEventMove,
-  onEventLeave,
   activeEventId,
   activeTooltipId,
   isScrollable = false,
   scrollDensity = 60,
   className,
   style,
+  onReady,
 }: MonthRowProps) {
   const daysInMonth = getDaysInMonth(year, month)
   const [gridSize, setGridSize] = useState({ height: 0, width: 0 })
   const gridRef = useRef<HTMLDivElement | null>(null)
+  const hasSignaledReady = useRef(false)
 
   useEffect(() => {
     const node = gridRef.current
     if (!node || typeof ResizeObserver === 'undefined') {
+      // No ResizeObserver support - signal ready immediately
+      if (!hasSignaledReady.current && onReady) {
+        hasSignaledReady.current = true
+        onReady()
+      }
       return
     }
     const observer = new ResizeObserver((entries) => {
@@ -280,12 +369,17 @@ function MonthRow({
         height: entry.contentRect.height,
         width: entry.contentRect.width,
       })
+      // Signal ready after first measurement
+      if (!hasSignaledReady.current && onReady) {
+        hasSignaledReady.current = true
+        onReady()
+      }
     })
     observer.observe(node)
     return () => {
       observer.disconnect()
     }
-  }, [])
+  }, [onReady])
 
   return (
     <div className={clsx('flex min-h-0', className)} style={style}>
@@ -312,6 +406,8 @@ function MonthRow({
             const isValidDay = day <= daysInMonth
             const dateKey = getDateKey(year, month + 1, day)
             const singleDayEvents = singleDayEventsByDate.get(dateKey) ?? []
+            const allDayEvents = allDayEventsByDate.get(dateKey) ?? []
+            const timedEvents = timedEventsByDate?.get(dateKey) ?? []
 
             return (
               <DayCell
@@ -322,13 +418,14 @@ function MonthRow({
                 isValid={isValidDay}
                 today={today}
                 singleDayEvents={singleDayEvents}
+                allDayEvents={allDayEvents}
+                timedEvents={timedEvents}
+                categories={categories}
                 showTitle={isScrollable}
                 titleDensity={scrollDensity}
                 availableHeight={gridSize.height}
                 availableWidth={gridSize.width}
-                onEventHover={onEventHover}
-                onEventMove={onEventMove}
-                onEventLeave={onEventLeave}
+                onEventClick={(event, position) => onEventHover?.(event, position, 'pointer')}
                 activeEventId={activeEventId}
                 activeTooltipId={activeTooltipId}
               />
@@ -338,9 +435,7 @@ function MonthRow({
 
         <EventBars
           bars={eventBars}
-          onEventHover={onEventHover}
-          onEventMove={onEventMove}
-          onEventLeave={onEventLeave}
+          onEventClick={(event, position) => onEventHover?.(event, position, 'pointer')}
           activeEventId={activeEventId}
           activeTooltipId={activeTooltipId}
           isScrollable={isScrollable}
@@ -357,14 +452,18 @@ interface DayCellProps {
   day: number
   isValid: boolean
   today: Date
+  /** Single-day events for dot display on year view */
   singleDayEvents?: YearbirdEvent[]
+  /** All-day and multi-day events for popover (includes events spanning this day) */
+  allDayEvents?: YearbirdEvent[]
+  /** Timed events for the day column view in popover */
+  timedEvents?: YearbirdEvent[]
+  categories: CategoryConfig[]
   showTitle?: boolean
   titleDensity?: number
   availableHeight?: number
   availableWidth?: number
-  onEventHover?: (event: YearbirdEvent, position: { x: number; y: number }, source?: TooltipSource) => void
-  onEventMove?: (position: { x: number; y: number }) => void
-  onEventLeave?: (eventId?: string) => void
+  onEventClick?: (event: YearbirdEvent, position: { x: number; y: number }) => void
   activeEventId?: string
   activeTooltipId?: string
 }
@@ -376,13 +475,14 @@ function DayCell({
   isValid,
   today,
   singleDayEvents = [],
+  allDayEvents = [],
+  timedEvents = [],
+  categories,
   showTitle = false,
   titleDensity = 60,
-  onEventHover,
-  onEventMove,
+  onEventClick,
   availableHeight = 0,
   availableWidth = 0,
-  onEventLeave,
   activeEventId,
   activeTooltipId,
 }: DayCellProps) {
@@ -395,96 +495,110 @@ function DayCell({
   const isTodayDate = isToday(year, month, day, today)
   const isPast = isPastDate(year, month, day, today)
   const dateKey = getDateKey(year, month + 1, day)
-  const url = buildGoogleCalendarCreateUrl(year, month, day)
-  const ariaLabel = `Create event on ${MONTHS[month]} ${day}, ${year}`
-  const primaryEvent = singleDayEvents[0]
-  const eventColor = primaryEvent?.color
-  const describedBy =
-    !showTitle && primaryEvent && activeEventId === primaryEvent.id ? activeTooltipId : undefined
-  const hasMultipleEvents = singleDayEvents.length > 1
+  const createUrl = buildGoogleCalendarCreateUrl(year, month, day)
+  const dayUrl = buildGoogleCalendarDayUrl(year, month, day)
+  const hasEvents = singleDayEvents.length > 0
 
-  const handleMouseEnter = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!primaryEvent || showTitle) {
-      return
-    }
-    onEventHover?.(primaryEvent, { x: event.clientX, y: event.clientY }, 'pointer')
-  }
+  // Visual indicator: dots for visible events only (same filter as year view)
+  // Timed events are hidden from dots but shown in popover when clicking
+  const cellContent = !showTitle && singleDayEvents.length > 0 ? (
+    <div
+      className="pointer-events-none absolute bottom-1 left-1 flex items-center gap-1"
+      aria-hidden="true"
+    >
+      {singleDayEvents.slice(0, 3).map((event) => (
+        <span
+          key={`${dateKey}-${event.id}`}
+          className="h-1.5 w-1.5 rounded-sm"
+          style={{ backgroundColor: event.color }}
+          data-color={event.color}
+        />
+      ))}
+      {singleDayEvents.length > 3 ? (
+        <span className="text-[8px] font-semibold text-zinc-400">+</span>
+      ) : null}
+    </div>
+  ) : null
 
-  const handleMouseMove = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!primaryEvent || showTitle) {
-      return
-    }
-    onEventMove?.({ x: event.clientX, y: event.clientY })
-  }
+  const cellClassName = clsx(
+    'relative block h-full w-full cursor-pointer border border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-500',
+    weekend ? 'bg-zinc-50' : 'bg-white',
+    isPast && 'opacity-60',
+    isTodayDate && 'border-sky-500/80 today-ring'
+  )
 
-  const handleMouseLeave = () => {
-    if (!primaryEvent || showTitle) {
-      return
-    }
-    onEventLeave?.(primaryEvent.id)
-  }
+  // Non-scrollable mode: Use popover for days with events, direct link for empty days
+  const hasTimedEvents = timedEvents.length > 0
+  const hasAllDayEvents = allDayEvents.length > 0
+  const hasAnyEvents = hasEvents || hasAllDayEvents || hasTimedEvents
 
-  const handleFocus = (event: FocusEvent<HTMLAnchorElement>) => {
-    if (!primaryEvent || showTitle) {
-      return
+  if (!showTitle) {
+    if (hasAnyEvents) {
+      const date = new Date(year, month, day)
+      const totalEvents = allDayEvents.length + timedEvents.length
+      const ariaLabel = `View ${totalEvents} event${totalEvents === 1 ? '' : 's'} on ${MONTHS[month]} ${day}, ${year}`
+
+      return (
+        <div className="group relative h-full w-full">
+          <DaySummaryPopover
+            date={date}
+            events={allDayEvents}
+            timedEvents={timedEvents}
+            categories={categories}
+            googleCalendarCreateUrl={createUrl}
+            googleCalendarDayUrl={dayUrl}
+            onEventClick={onEventClick}
+          >
+            <div
+              className={cellClassName}
+              data-date={dateKey}
+              role="button"
+              tabIndex={0}
+              aria-label={ariaLabel}
+              aria-current={isTodayDate ? 'date' : undefined}
+            >
+              {cellContent}
+            </div>
+          </DaySummaryPopover>
+        </div>
+      )
     }
-    const rect = event.currentTarget.getBoundingClientRect()
-    onEventHover?.(
-      primaryEvent,
-      { x: rect.left + rect.width / 2, y: rect.top + rect.height },
-      'focus'
+
+    // Empty day: direct link to create event
+    const ariaLabel = `Create event on ${MONTHS[month]} ${day}, ${year}`
+    return (
+      <div className="group relative h-full w-full">
+        <a
+          className={cellClassName}
+          data-date={dateKey}
+          href={createUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={ariaLabel}
+          aria-current={isTodayDate ? 'date' : undefined}
+        />
+      </div>
     )
   }
+
+  // Scrollable mode (showTitle=true): click events in DayEventsStack, anchor links to Google Calendar
+  const ariaLabel = hasEvents
+    ? `${singleDayEvents.length} event${singleDayEvents.length === 1 ? '' : 's'} on ${MONTHS[month]} ${day}, ${year}`
+    : `Create event on ${MONTHS[month]} ${day}, ${year}`
 
   return (
     <div className="group relative h-full w-full">
       <a
-        className={clsx(
-          'relative block h-full w-full cursor-pointer border border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-500',
-          weekend ? 'bg-zinc-50' : 'bg-white',
-          isPast && 'opacity-60',
-          isTodayDate && 'border-sky-500/80 today-ring'
-        )}
+        className={cellClassName}
         data-date={dateKey}
-        href={url}
+        href={createUrl}
         target="_blank"
         rel="noopener noreferrer"
         aria-label={ariaLabel}
         aria-current={isTodayDate ? 'date' : undefined}
-        aria-describedby={describedBy}
-        onMouseEnter={handleMouseEnter}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        onFocus={handleFocus}
-        onBlur={handleMouseLeave}
       >
-        {eventColor && !showTitle && !hasMultipleEvents ? (
-          <span
-            className="absolute inset-x-1 bottom-0 h-1 rounded-full"
-            style={{ backgroundColor: eventColor }}
-            data-color={eventColor}
-            aria-hidden="true"
-          />
-        ) : null}
+        {cellContent}
       </a>
-      {!showTitle && hasMultipleEvents ? (
-        <div
-          className="pointer-events-none absolute bottom-1 left-1 flex items-center gap-1"
-          aria-hidden="true"
-        >
-          {singleDayEvents.slice(0, 3).map((event) => (
-            <span
-              key={`${dateKey}-${event.id}`}
-              className="h-1.5 w-1.5 rounded-sm"
-              style={{ backgroundColor: event.color }}
-              data-color={event.color}
-            />
-          ))}
-          {singleDayEvents.length > 3 ? (
-            <span className="text-[8px] font-semibold text-zinc-400">+</span>
-          ) : null}
-        </div>
-      ) : null}
       {showTitle && singleDayEvents.length > 0 ? (
         <DayEventsStack
           dateKey={dateKey}
@@ -494,9 +608,7 @@ function DayCell({
           availableWidth={availableWidth}
           activeEventId={activeEventId}
           activeTooltipId={activeTooltipId}
-          onEventHover={onEventHover}
-          onEventMove={onEventMove}
-          onEventLeave={onEventLeave}
+          onEventClick={onEventClick}
         />
       ) : null}
     </div>
@@ -511,9 +623,7 @@ interface DayEventsStackProps {
   availableWidth: number
   activeEventId?: string
   activeTooltipId?: string
-  onEventHover?: (event: YearbirdEvent, position: { x: number; y: number }, source?: TooltipSource) => void
-  onEventMove?: (position: { x: number; y: number }) => void
-  onEventLeave?: () => void
+  onEventClick?: (event: YearbirdEvent, position: { x: number; y: number }) => void
 }
 
 const allocateStackLines = (neededLines: number[], maxLinesTotal: number) => {
@@ -573,9 +683,7 @@ function DayEventsStack({
   availableWidth,
   activeEventId,
   activeTooltipId,
-  onEventHover,
-  onEventMove,
-  onEventLeave,
+  onEventClick,
 }: DayEventsStackProps) {
   if (events.length === 0) {
     return null
@@ -620,19 +728,13 @@ function DayEventsStack({
         const describedByItem = activeEventId === event.id ? activeTooltipId : undefined
         const clampLines = showStackTitles ? lineAllocations[index] ?? 1 : undefined
         const shouldClamp = showStackTitles && clampLines !== undefined && clampLines < estimatedLines[index]
-        const handleItemMouseEnter = (eventMouse: MouseEvent<HTMLDivElement>) => {
-          onEventHover?.(event, { x: eventMouse.clientX, y: eventMouse.clientY }, 'pointer')
-        }
-        const handleItemMouseMove = (eventMouse: MouseEvent<HTMLDivElement>) => {
-          onEventMove?.({ x: eventMouse.clientX, y: eventMouse.clientY })
+
+        const handleItemClick = (eventClick: MouseEvent<HTMLDivElement>) => {
+          onEventClick?.(event, { x: eventClick.clientX, y: eventClick.clientY })
         }
         const handleItemFocus = (eventFocus: FocusEvent<HTMLDivElement>) => {
           const rect = eventFocus.currentTarget.getBoundingClientRect()
-          onEventHover?.(
-            event,
-            { x: rect.left + rect.width / 2, y: rect.top + rect.height },
-            'focus'
-          )
+          onEventClick?.(event, { x: rect.left + rect.width / 2, y: rect.top + rect.height })
         }
         const handleItemKeyDown = (eventKey: KeyboardEvent<HTMLDivElement>) => {
           if (eventKey.key !== 'Enter' && eventKey.key !== ' ') {
@@ -640,21 +742,14 @@ function DayEventsStack({
           }
           eventKey.preventDefault()
           const rect = eventKey.currentTarget.getBoundingClientRect()
-          onEventHover?.(
-            event,
-            { x: rect.left + rect.width / 2, y: rect.top + rect.height },
-            'focus'
-          )
-        }
-        const handleItemClick = (eventClick: MouseEvent<HTMLDivElement>) => {
-          onEventHover?.(event, { x: eventClick.clientX, y: eventClick.clientY }, 'pointer')
+          onEventClick?.(event, { x: rect.left + rect.width / 2, y: rect.top + rect.height })
         }
 
         return (
           <div
             key={`${dateKey}-${event.id}`}
             className={clsx(
-              'pointer-events-auto rounded-sm text-white',
+              'pointer-events-auto cursor-pointer rounded-sm text-white',
               showStackTitles ? 'px-1.5 break-words' : 'px-1'
             )}
             style={{
@@ -672,11 +767,7 @@ function DayEventsStack({
             aria-label={event.title}
             aria-describedby={describedByItem}
             onClick={handleItemClick}
-            onMouseEnter={handleItemMouseEnter}
-            onMouseMove={handleItemMouseMove}
-            onMouseLeave={onEventLeave}
             onFocus={handleItemFocus}
-            onBlur={onEventLeave}
             onKeyDown={handleItemKeyDown}
           >
             {showStackTitles ? event.title : null}

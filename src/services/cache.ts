@@ -10,6 +10,7 @@ import type { YearbirdEvent } from '../types/calendar'
 /**
  * Get cached events (always returns null - caching disabled).
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function getCachedEvents(_year: number, _suffix?: string): YearbirdEvent[] | null {
   return null
 }
@@ -17,6 +18,7 @@ export function getCachedEvents(_year: number, _suffix?: string): YearbirdEvent[
 /**
  * Set cached events (no-op - caching disabled).
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function setCachedEvents(_year: number, _events: YearbirdEvent[], _suffix?: string): void {
   // No-op: caching disabled
 }
@@ -24,6 +26,7 @@ export function setCachedEvents(_year: number, _events: YearbirdEvent[], _suffix
 /**
  * Clear cached events for a year (no-op - caching disabled).
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function clearCachedEvents(_year: number, _suffix?: string): void {
   // No-op: caching disabled
 }
@@ -45,6 +48,7 @@ export function clearEventCaches(): void {
 /**
  * Get cache timestamp (always returns null - caching disabled).
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function getCacheTimestamp(_year: number, _suffix?: string): Date | null {
   return null
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { YearbirdEvent } from '../../types/calendar'
 import { ExternalLinkIcon } from '../icons/ExternalLinkIcon'
 import { TouchTarget } from '../ui/button'
@@ -11,11 +11,7 @@ interface EventTooltipProps {
   event: YearbirdEvent
   position: { x: number; y: number }
   categories: CategoryConfig[]
-  onMouseEnter?: () => void
-  onMouseLeave?: () => void
   onHideEvent?: (title: string) => void
-  onFocus?: () => void
-  onBlur?: () => void
   autoFocus?: boolean
 }
 
@@ -42,20 +38,16 @@ const formatDateRange = (event: YearbirdEvent) => {
   return `${startLabel} - ${endLabel}`
 }
 
-export function EventTooltip({
+export const EventTooltip = forwardRef<HTMLDivElement, EventTooltipProps>(function EventTooltip({
   event,
   position,
   categories,
-  onMouseEnter,
-  onMouseLeave,
   onHideEvent,
-  onFocus,
-  onBlur,
   autoFocus = false,
-}: EventTooltipProps) {
+}, ref) {
   const category = getCategoryConfig(event.category, categories)
   const googleLinkTooltipId = `${getEventTooltipId(event.id)}-google-link`
-  const tooltipRef = useRef<HTMLDivElement | null>(null)
+  const internalRef = useRef<HTMLDivElement | null>(null)
   const linkRef = useRef<HTMLAnchorElement | null>(null)
   const hideButtonRef = useRef<HTMLButtonElement | null>(null)
   const [tooltipSize, setTooltipSize] = useState({ width: 0, height: 0 })
@@ -98,7 +90,7 @@ export function EventTooltip({
   }, [])
 
   useLayoutEffect(() => {
-    const node = tooltipRef.current
+    const node = internalRef.current
     if (!node || typeof window === 'undefined') {
       return
     }
@@ -155,25 +147,24 @@ export function EventTooltip({
   const calendarLabel = event.calendarName ?? event.calendarId
   const calendarColor = event.calendarColor ?? DEFAULT_CALENDAR_COLOR
 
-  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      return
+  // Merge forwarded ref with internal ref
+  const setRefs = useCallback((node: HTMLDivElement | null) => {
+    internalRef.current = node
+    if (typeof ref === 'function') {
+      ref(node)
+    } else if (ref) {
+      ref.current = node
     }
-    onBlur?.()
-  }
+  }, [ref])
 
   return (
     <div
-      ref={tooltipRef}
+      ref={setRefs}
       className="pointer-events-auto fixed z-50 max-w-xs rounded-lg border border-zinc-200 bg-white p-3 shadow-lg"
       style={tooltipStyle}
       id={getEventTooltipId(event.id)}
       role="tooltip"
       aria-label={`${event.title} details`}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      onFocus={onFocus}
-      onBlur={handleBlur}
     >
       <span
         className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
@@ -244,4 +235,4 @@ export function EventTooltip({
       ) : null}
     </div>
   )
-}
+})

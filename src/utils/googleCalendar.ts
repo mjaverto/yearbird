@@ -1,4 +1,5 @@
 const GOOGLE_CALENDAR_EVENT_CREATE_URL = 'https://calendar.google.com/calendar/r/eventedit'
+const GOOGLE_CALENDAR_DAY_URL = 'https://calendar.google.com/calendar/r/day'
 
 const padDatePart = (value: number) => value.toString().padStart(2, '0')
 
@@ -13,4 +14,8 @@ export const buildGoogleCalendarCreateUrl = (year: number, monthIndex: number, d
 
   const dates = `${formatDate(start)}/${formatDate(end)}`
   return `${GOOGLE_CALENDAR_EVENT_CREATE_URL}?dates=${dates}&allday=true`
+}
+
+export const buildGoogleCalendarDayUrl = (year: number, monthIndex: number, day: number) => {
+  return `${GOOGLE_CALENDAR_DAY_URL}/${year}/${monthIndex + 1}/${day}`
 }

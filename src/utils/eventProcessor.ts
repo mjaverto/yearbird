@@ -50,6 +50,50 @@ const getDateOnlyFromDateTime = (dateTime: string, timeZone?: string) => {
   return formatter.format(parsed)
 }
 
+/**
+ * Extracts time in HH:MM format (24-hour) from a datetime string.
+ * Uses the provided timezone to format correctly.
+ */
+const getTimeFromDateTime = (dateTime: string, timeZone?: string): string | null => {
+  const parsed = new Date(dateTime)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || undefined,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+
+  return formatter.format(parsed)
+}
+
+/**
+ * Calculates minutes from midnight for a datetime string.
+ * Used for positioning events in the day column view.
+ */
+const getMinutesFromMidnight = (dateTime: string, timeZone?: string): number | null => {
+  const parsed = new Date(dateTime)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || undefined,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+
+  const parts = formatter.formatToParts(parsed)
+  const hour = Number.parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10)
+  const minute = Number.parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10)
+
+  return hour * 60 + minute
+}
+
 const diffDateOnly = (startDate: string, endDate: string): number | null => {
   const start = parseAsLocalDate(startDate)
   const end = parseAsLocalDate(endDate)
@@ -111,6 +155,10 @@ export function processEvent(
   let startDate: string
   let endDate: string
   let durationDays: number
+  let startTime: string | undefined
+  let endTime: string | undefined
+  let startTimeMinutes: number | undefined
+  let endTimeMinutes: number | undefined
 
   if (isAllDay) {
     startDate = event.start.date!
@@ -140,6 +188,17 @@ export function processEvent(
       return null
     }
     durationDays = timedDuration
+
+    // Extract time data for timed events
+    const startTimeValue = getTimeFromDateTime(event.start.dateTime!, timeZone)
+    const endTimeValue = getTimeFromDateTime(event.end.dateTime!, timeZone)
+    const startMinutes = getMinutesFromMidnight(event.start.dateTime!, timeZone)
+    const endMinutes = getMinutesFromMidnight(event.end.dateTime!, timeZone)
+
+    if (startTimeValue) startTime = startTimeValue
+    if (endTimeValue) endTime = endTimeValue
+    if (startMinutes !== null) startTimeMinutes = startMinutes
+    if (endMinutes !== null) endTimeMinutes = endMinutes
   }
 
   const isMultiDay = durationDays > 1
@@ -168,6 +227,10 @@ export function processEvent(
     category,
     color,
     ...(calendarId ? { calendarId } : {}),
+    ...(startTime ? { startTime } : {}),
+    ...(endTime ? { endTime } : {}),
+    ...(startTimeMinutes !== undefined ? { startTimeMinutes } : {}),
+    ...(endTimeMinutes !== undefined ? { endTimeMinutes } : {}),
   }
 }
 

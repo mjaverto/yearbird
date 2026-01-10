@@ -2,17 +2,13 @@ import type { FocusEvent, KeyboardEvent, MouseEvent } from 'react'
 import clsx from 'clsx'
 import type { EventBar } from '../../utils/eventBars'
 import type { YearbirdEvent } from '../../types/calendar'
-import type { TooltipSource } from '../../hooks/useTooltip'
 import { getDensityScale } from '../../utils/density'
 
 type TooltipPosition = { x: number; y: number }
 
 interface EventBarsProps {
   bars: EventBar[]
-  onEventClick?: (event: YearbirdEvent) => void
-  onEventHover?: (event: YearbirdEvent, position: TooltipPosition, source?: TooltipSource) => void
-  onEventMove?: (position: TooltipPosition) => void
-  onEventLeave?: (eventId?: string) => void
+  onEventClick?: (event: YearbirdEvent, position: TooltipPosition) => void
   activeEventId?: string
   activeTooltipId?: string
   isScrollable?: boolean
@@ -30,9 +26,6 @@ const SCROLL_BAR_FONT_MIN = 8
 export function EventBars({
   bars,
   onEventClick,
-  onEventHover,
-  onEventMove,
-  onEventLeave,
   activeEventId,
   activeTooltipId,
   isScrollable = false,
@@ -63,14 +56,7 @@ export function EventBars({
           tooltipId={activeTooltipId}
           isScrollable={isScrollable}
           densityScale={densityScale}
-          onClick={() => onEventClick?.(bar.event)}
-          onHover={
-            onEventHover
-              ? (position, source) => onEventHover(bar.event, position, source)
-              : undefined
-          }
-          onMove={onEventMove}
-          onLeave={onEventLeave}
+          onClick={(position) => onEventClick?.(bar.event, position)}
         />
       ))}
     </div>
@@ -84,10 +70,7 @@ interface EventBarItemProps {
   tooltipId?: string
   isScrollable: boolean
   densityScale: number
-  onClick: () => void
-  onHover?: (position: TooltipPosition, source: TooltipSource) => void
-  onMove?: (position: TooltipPosition) => void
-  onLeave?: (eventId: string) => void
+  onClick: (position: TooltipPosition) => void
 }
 
 function EventBarItem({
@@ -98,9 +81,6 @@ function EventBarItem({
   isScrollable,
   densityScale,
   onClick,
-  onHover,
-  onMove,
-  onLeave,
 }: EventBarItemProps) {
   // In scrollable mode, use density-based sizing; otherwise use CSS variable for TV scaling
   const barFontSize = isScrollable
@@ -110,30 +90,22 @@ function EventBarItem({
   const width = ((bar.endDay - bar.startDay + 1) / DAY_COLUMN_COUNT) * 100
   const top = bar.row * (rowHeightPercent + ROW_GAP_PERCENT)
   const describedBy = isActive ? tooltipId : undefined
+
+  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+    onClick({ x: event.clientX, y: event.clientY })
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
-      onClick()
+      const rect = event.currentTarget.getBoundingClientRect()
+      onClick({ x: rect.left + rect.width / 2, y: rect.top + rect.height })
     }
   }
-  const handleMouseEnter = (event: MouseEvent<HTMLDivElement>) => {
-    onHover?.({ x: event.clientX, y: event.clientY }, 'pointer')
-  }
-  const handleMouseMove = (event: MouseEvent<HTMLDivElement>) => {
-    onMove?.({ x: event.clientX, y: event.clientY })
-  }
-  const handleMouseLeave = () => {
-    onLeave?.(bar.event.id)
-  }
+
   const handleFocus = (event: FocusEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
-    onHover?.(
-      {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height,
-      },
-      'focus'
-    )
+    onClick({ x: rect.left + rect.width / 2, y: rect.top + rect.height })
   }
 
   return (
@@ -163,14 +135,10 @@ function EventBarItem({
         tabIndex={0}
         aria-label={bar.event.title}
         aria-describedby={describedBy}
-    onClick={onClick}
-    onMouseEnter={handleMouseEnter}
-    onMouseMove={handleMouseMove}
-    onMouseLeave={handleMouseLeave}
-    onFocus={handleFocus}
-    onBlur={handleMouseLeave}
-    onKeyDown={handleKeyDown}
-  >
+        onClick={handleClick}
+        onFocus={handleFocus}
+        onKeyDown={handleKeyDown}
+      >
         <span className="truncate">{bar.event.title}</span>
       </div>
     </div>

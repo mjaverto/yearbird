@@ -82,4 +82,12 @@ export interface YearbirdEvent {
   calendarName?: string
   /** Color of the calendar this event belongs to */
   calendarColor?: string
+  /** Start time in HH:MM format (24h) - only for timed events */
+  startTime?: string
+  /** End time in HH:MM format (24h) - only for timed events */
+  endTime?: string
+  /** Minutes from midnight for start time - for positioning in day column view */
+  startTimeMinutes?: number
+  /** Minutes from midnight for end time - for calculating height in day column view */
+  endTimeMinutes?: number
 }

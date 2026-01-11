@@ -228,8 +228,8 @@ export default {
       const tokenData = (await tokenResponse.json()) as GoogleTokenResponse
 
       if (!tokenResponse.ok || tokenData.error) {
-        // Log only error code, not description (may contain sensitive info)
-        console.error('Token exchange failed:', tokenData.error)
+        // Log error details for debugging (will be visible in wrangler tail)
+        console.error('Token exchange failed:', tokenData.error, tokenData.error_description)
         return Response.json(
           { error: 'token_exchange_failed' },
           { status: 400, headers: corsHeaders(origin) },

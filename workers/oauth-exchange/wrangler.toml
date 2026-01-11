@@ -1,6 +1,12 @@
 name = "yearbird-oauth"
 main = "index.ts"
 compatibility_date = "2024-01-01"
+workers_dev = true  # Keep workers.dev endpoint as backup
+
+# Custom domain for cleaner OAuth URL
+[[routes]]
+pattern = "oauth.yearbird.com"
+custom_domain = true
 
 [vars]
 GOOGLE_CLIENT_ID = "136150782592-g30i15uq3da6e2e9ak5hmjrkpt7lndnb.apps.googleusercontent.com"

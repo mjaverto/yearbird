@@ -167,11 +167,12 @@ const ensureOpenPatched = () => {
  * on such a popup, Chrome logs a warning and may return an unreliable value.
  *
  * This function wraps the check in a try-catch and falls back to assuming
- * the popup is NOT closed (conservative approach - better to try to focus
- * an existing popup than to open duplicates).
+ * the popup IS closed when access is blocked. This prioritizes keeping the
+ * sign-in flow working (user can open a new popup) over preventing occasional
+ * duplicate popups. A stuck UI is worse than a duplicate popup.
  *
  * @param popup - The popup window reference to check
- * @returns true if the popup is definitely closed, false if open or unknown
+ * @returns true if the popup is closed or its state is unknown, false if open
  */
 const isPopupClosed = (popup: Window | null): boolean => {
   if (!popup) {
@@ -181,9 +182,10 @@ const isPopupClosed = (popup: Window | null): boolean => {
     // This may trigger COOP warning in console, but we handle it gracefully
     return popup.closed
   } catch {
-    // COOP policy blocked access - assume popup is still open
-    // (conservative: better to focus existing than open duplicate)
-    return false
+    // COOP policy blocked access. Assume popup is closed to avoid a stuck UI.
+    // This prioritizes keeping the sign-in flow working over preventing
+    // an occasional duplicate popup.
+    return true
   }
 }
 

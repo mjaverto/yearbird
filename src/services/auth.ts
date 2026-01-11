@@ -159,11 +159,39 @@ const ensureOpenPatched = () => {
   }
 }
 
+/**
+ * Safely checks if a popup window is closed, handling COOP restrictions.
+ *
+ * Google's OAuth popup sets `Cross-Origin-Opener-Policy: same-origin` which
+ * prevents cross-origin access to window properties. When checking `.closed`
+ * on such a popup, Chrome logs a warning and may return an unreliable value.
+ *
+ * This function wraps the check in a try-catch and falls back to assuming
+ * the popup is NOT closed (conservative approach - better to try to focus
+ * an existing popup than to open duplicates).
+ *
+ * @param popup - The popup window reference to check
+ * @returns true if the popup is definitely closed, false if open or unknown
+ */
+const isPopupClosed = (popup: Window | null): boolean => {
+  if (!popup) {
+    return true
+  }
+  try {
+    // This may trigger COOP warning in console, but we handle it gracefully
+    return popup.closed
+  } catch {
+    // COOP policy blocked access - assume popup is still open
+    // (conservative: better to focus existing than open duplicate)
+    return false
+  }
+}
+
 const getOpenPopup = () => {
   if (!signInPopup) {
     return null
   }
-  if (signInPopup.closed) {
+  if (isPopupClosed(signInPopup)) {
     signInPopup = null
     return null
   }

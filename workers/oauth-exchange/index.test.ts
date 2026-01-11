@@ -151,17 +151,27 @@ describe('OAuth Exchange Worker', () => {
       expect(body).toEqual({ error: 'missing_parameters' })
     })
 
-    it('returns 400 for missing code_verifier', async () => {
+    it('accepts request without code_verifier (GIS popup flow)', async () => {
+      // GIS popup flow doesn't support PKCE, so code_verifier is optional
+      // Mock successful Google response
+      mockGoogleFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            access_token: 'test-access-token',
+            expires_in: 3600,
+            scope: 'calendar.readonly',
+            token_type: 'Bearer',
+          }),
+      })
+
       const request = createRequest('POST', 'https://yearbird.app', {
         code: 'test-code',
-        redirect_uri: 'https://yearbird.app/callback',
+        redirect_uri: 'postmessage',
       })
 
       const response = await worker.fetch(request, mockEnv)
-      const body = await response.json()
-
-      expect(response.status).toBe(400)
-      expect(body).toEqual({ error: 'missing_parameters' })
+      expect(response.status).toBe(200)
     })
 
     it('returns 400 for missing redirect_uri', async () => {

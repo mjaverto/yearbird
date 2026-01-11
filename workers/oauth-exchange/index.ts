@@ -18,7 +18,7 @@ interface Env {
 
 interface TokenRequest {
   code: string
-  code_verifier: string
+  code_verifier?: string // Optional - only used for redirect flow with PKCE
   redirect_uri: string
 }
 
@@ -196,7 +196,8 @@ export default {
       const body = (await request.json()) as TokenRequest
       const { code, code_verifier, redirect_uri } = body
 
-      if (!code || !code_verifier || !redirect_uri) {
+      // code_verifier is optional (only used for redirect flow with PKCE)
+      if (!code || !redirect_uri) {
         return Response.json(
           { error: 'missing_parameters' },
           { status: 400, headers: corsHeaders(origin) },
@@ -211,18 +212,24 @@ export default {
         )
       }
 
+      // Build token request params - only include code_verifier if provided
+      // GIS popup flow doesn't support PKCE, so we omit it for 'postmessage' redirect
+      const tokenParams: Record<string, string> = {
+        client_id: env.GOOGLE_CLIENT_ID,
+        client_secret: env.GOOGLE_CLIENT_SECRET,
+        code,
+        redirect_uri,
+        grant_type: 'authorization_code',
+      }
+      if (code_verifier) {
+        tokenParams.code_verifier = code_verifier
+      }
+
       // Exchange code for token with Google
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: env.GOOGLE_CLIENT_ID,
-          client_secret: env.GOOGLE_CLIENT_SECRET,
-          code,
-          code_verifier,
-          redirect_uri,
-          grant_type: 'authorization_code',
-        }),
+        body: new URLSearchParams(tokenParams),
       })
 
       const tokenData = (await tokenResponse.json()) as GoogleTokenResponse

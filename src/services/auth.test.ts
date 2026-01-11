@@ -312,6 +312,43 @@ describe('auth service', () => {
     window.open = originalOpen
   })
 
+  it('treats popup as closed when COOP blocks access to closed property', async () => {
+    // Simulate COOP (Cross-Origin-Opener-Policy) blocking access to popup.closed
+    // This happens when Google's OAuth popup sets COOP: same-origin
+    const popup = {
+      get closed(): boolean {
+        throw new DOMException('Blocked by COOP', 'SecurityError')
+      },
+      focus: vi.fn(),
+    } as unknown as Window
+
+    const originalOpen = window.open
+    window.open = vi.fn(() => popup)
+    const requestCode = vi.fn(() => {
+      window.open('https://accounts.google.com', 'yearbird-google-auth')
+    })
+    const initCodeClient = vi.fn(() => ({ requestCode }))
+
+    globalWithGoogle.google = {
+      accounts: {
+        oauth2: {
+          initCodeClient,
+          revoke: vi.fn(),
+        },
+      },
+    }
+
+    const auth = await loadAuth()
+    auth.initializeAuth(() => {})
+    await auth.signIn()
+
+    // When COOP blocks access, hasOpenSignInPopup should return false
+    // (assumes closed so user can retry sign-in rather than getting stuck)
+    expect(auth.hasOpenSignInPopup()).toBe(false)
+
+    window.open = originalOpen
+  })
+
   it('window.open patch does not capture non-auth popups', async () => {
     const popup = { closed: false, focus: vi.fn() } as unknown as Window
     const originalOpen = window.open

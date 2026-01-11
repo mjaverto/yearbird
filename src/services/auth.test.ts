@@ -78,15 +78,15 @@ describe('auth service', () => {
 
   it('stores auth tokens', async () => {
     const auth = await loadAuth()
-    const expiresAt = auth.storeAuth('token', 120)
+    const expiresAt = auth.storeAuth('test-token-123', 120)
 
-    expect(auth.getStoredAuth()).toEqual({ accessToken: 'token', expiresAt })
+    expect(auth.getStoredAuth()).toEqual({ accessToken: 'test-token-123', expiresAt })
   })
 
   it('stores granted scopes when provided', async () => {
     const auth = await loadAuth()
     const testScopes = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata'
-    auth.storeAuth('token', 120, testScopes)
+    auth.storeAuth('test-token-123', 120, testScopes)
 
     expect(auth.getGrantedScopes()).toBe(testScopes)
     expect(sessionStorage.getItem('yearbird:grantedScopes')).toBe(testScopes)
@@ -94,7 +94,7 @@ describe('auth service', () => {
 
   it('does not store scopes when not provided', async () => {
     const auth = await loadAuth()
-    auth.storeAuth('token', 120)
+    auth.storeAuth('test-token-123', 120)
 
     expect(auth.getGrantedScopes()).toBeNull()
     expect(sessionStorage.getItem('yearbird:grantedScopes')).toBeNull()
@@ -103,7 +103,7 @@ describe('auth service', () => {
   it('hasDriveScope returns true when drive.appdata scope is granted', async () => {
     const auth = await loadAuth()
     const testScopes = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata'
-    auth.storeAuth('token', 120, testScopes)
+    auth.storeAuth('test-token-123', 120, testScopes)
 
     expect(auth.hasDriveScope()).toBe(true)
   })
@@ -111,14 +111,14 @@ describe('auth service', () => {
   it('hasDriveScope returns false when only calendar scope is granted', async () => {
     const auth = await loadAuth()
     const testScopes = 'https://www.googleapis.com/auth/calendar.readonly'
-    auth.storeAuth('token', 120, testScopes)
+    auth.storeAuth('test-token-123', 120, testScopes)
 
     expect(auth.hasDriveScope()).toBe(false)
   })
 
   it('hasDriveScope returns false when no scopes are stored', async () => {
     const auth = await loadAuth()
-    auth.storeAuth('token', 120)
+    auth.storeAuth('test-token-123', 120)
 
     expect(auth.hasDriveScope()).toBe(false)
   })
@@ -382,7 +382,7 @@ describe('auth service', () => {
 
       // Mock successful token exchange
       mockExchangeCodeForToken.mockResolvedValue({
-        access_token: 'new-token',
+        access_token: 'new-test-token',
         expires_in: 3600,
         scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
       })
@@ -483,7 +483,7 @@ describe('auth service', () => {
       }
 
       const mockResponse = {
-        access_token: 'new-token',
+        access_token: 'new-test-token',
         expires_in: 3600,
         scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
       }
@@ -532,7 +532,7 @@ describe('auth service', () => {
 
       // Mock response where user only granted calendar scope (declined drive)
       mockExchangeCodeForToken.mockResolvedValue({
-        access_token: 'new-token',
+        access_token: 'new-test-token',
         expires_in: 3600,
         scope: 'https://www.googleapis.com/auth/calendar.readonly',
       })

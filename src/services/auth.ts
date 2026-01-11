@@ -138,6 +138,10 @@ const ensureOpenPatched = () => {
     return
   }
 
+  // Set flag BEFORE patching to prevent race condition where concurrent calls
+  // could both pass the check and double-patch window.open
+  hasPatchedOpen = true
+
   const originalOpen = window.open
   window.open = (...args) => {
     const popup = originalOpen.apply(window, args as Parameters<typeof window.open>)
@@ -153,7 +157,6 @@ const ensureOpenPatched = () => {
     }
     return popup
   }
-  hasPatchedOpen = true
 }
 
 const getOpenPopup = () => {
@@ -378,6 +381,14 @@ export function getStoredAuth(): { accessToken: string; expiresAt: number } | nu
 }
 
 export function storeAuth(token: string, expiresIn: number, scopes?: string) {
+  // Validate token data to prevent storing invalid/malicious tokens
+  if (!token || typeof token !== 'string' || token.length < 10) {
+    throw new Error('Invalid access token')
+  }
+  if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
+    throw new Error('Invalid token expiration')
+  }
+
   const expiresAt = Date.now() + expiresIn * 1000
   sessionStorage.setItem(ACCESS_TOKEN_KEY, token)
   sessionStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString())

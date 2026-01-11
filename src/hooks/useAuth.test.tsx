@@ -13,7 +13,11 @@ vi.mock('../services/auth', () => ({
   signOut: vi.fn(),
   storeAuth: vi.fn(),
   CLIENT_ID: 'test-client-id',
-  SCOPES: 'test-scope-1 test-scope-2',
+  ALL_SCOPES: 'test-scope-1 test-scope-2',
+}))
+
+vi.mock('../services/tokenExchange', () => ({
+  exchangeCodeForToken: vi.fn(),
 }))
 
 vi.mock('../utils/tvDetection', () => ({
@@ -25,7 +29,11 @@ vi.mock('../utils/tvDetection', () => ({
 vi.mock('../utils/manualOAuth', () => ({
   buildOAuthRedirectUrl: vi.fn(),
   clearHashFromUrl: vi.fn(),
+  clearQueryFromUrl: vi.fn(),
+  consumeCodeVerifier: vi.fn(),
+  extractCodeFromUrl: vi.fn(),
   extractErrorFromHash: vi.fn(),
+  extractErrorFromUrl: vi.fn(),
   extractTokenFromHash: vi.fn(),
 }))
 
@@ -50,7 +58,11 @@ import {
 import {
   buildOAuthRedirectUrl,
   clearHashFromUrl,
+  clearQueryFromUrl,
+  consumeCodeVerifier,
+  extractCodeFromUrl,
   extractErrorFromHash,
+  extractErrorFromUrl,
   extractTokenFromHash,
 } from '../utils/manualOAuth'
 
@@ -90,11 +102,13 @@ describe('useAuth', () => {
     vi.clearAllMocks()
     vi.mocked(hasClientId).mockReturnValue(true)
     vi.mocked(hasOpenSignInPopup).mockReturnValue(false)
-    vi.mocked(signInService).mockReturnValue('opened')
+    vi.mocked(signInService).mockResolvedValue('opened')
     // TV detection mocks - default to false/disabled
     vi.mocked(getTvModePreference).mockReturnValue(false)
     vi.mocked(isTVBrowser).mockReturnValue(false)
-    // Manual OAuth mocks - default to no hash data
+    // Manual OAuth mocks - default to no URL data
+    vi.mocked(extractCodeFromUrl).mockReturnValue(null)
+    vi.mocked(extractErrorFromUrl).mockReturnValue(null)
     vi.mocked(extractErrorFromHash).mockReturnValue(null)
     vi.mocked(extractTokenFromHash).mockReturnValue(null)
   })
@@ -113,11 +127,11 @@ describe('useAuth', () => {
     expect(screen.getByTestId('auth').textContent).toBe('true')
   })
 
-  it('handles auth errors from token response', async () => {
-    let tokenCallback: ((response: google.accounts.oauth2.TokenResponse) => void) | undefined
+  it('handles auth errors from error callback', async () => {
+    let errorCallback: ((error: string) => void) | undefined
     vi.mocked(getStoredAuth).mockReturnValue(null)
-    vi.mocked(initializeAuth).mockImplementation((callback) => {
-      tokenCallback = callback
+    vi.mocked(initializeAuth).mockImplementation((_callback, onError) => {
+      errorCallback = onError
       return true
     })
 
@@ -126,7 +140,7 @@ describe('useAuth', () => {
     await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
 
     act(() => {
-      tokenCallback?.({ error: 'access_denied' } as google.accounts.oauth2.TokenResponse)
+      errorCallback?.('access_denied')
     })
 
     await waitFor(() => expect(screen.getByTestId('notice').textContent).toBe('Sign-in failed. Try again.'))
@@ -169,15 +183,20 @@ describe('useAuth', () => {
 
     render(<AuthProbe />)
 
-    act(() => {
+    await act(async () => {
       vi.runOnlyPendingTimers()
     })
     expect(screen.getByTestId('ready').textContent).toBe('true')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    // signIn is now async, so wrap in act
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+      // Allow the async signIn to complete
+      await Promise.resolve()
+    })
     expect(screen.getByTestId('signing').textContent).toBe('true')
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(350)
     })
 
@@ -185,7 +204,7 @@ describe('useAuth', () => {
 
     vi.mocked(hasOpenSignInPopup).mockReturnValue(false)
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(350)
     })
 
@@ -280,7 +299,7 @@ describe('useAuth', () => {
   it('sets isGisUnavailable when signIn returns unavailable', async () => {
     vi.mocked(getStoredAuth).mockReturnValue(null)
     vi.mocked(initializeAuth).mockReturnValue(true)
-    vi.mocked(signInService).mockReturnValue('unavailable')
+    vi.mocked(signInService).mockResolvedValue('unavailable')
 
     render(<AuthProbe />)
 
@@ -288,7 +307,10 @@ describe('useAuth', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    expect(screen.getByTestId('gisUnavailable').textContent).toBe('true')
+    // Wait for the async signIn to complete and update state
+    await waitFor(() => {
+      expect(screen.getByTestId('gisUnavailable').textContent).toBe('true')
+    })
     expect(screen.getByTestId('notice').textContent).toBe('Google sign-in unavailable. Refresh to try again.')
     expect(screen.getByTestId('signing').textContent).toBe('false')
   })
@@ -300,7 +322,8 @@ describe('useAuth', () => {
 
     vi.mocked(getStoredAuth).mockReturnValue(null)
     vi.mocked(initializeAuth).mockReturnValue(true)
-    vi.mocked(buildOAuthRedirectUrl).mockReturnValue('https://accounts.google.com/oauth?test=1')
+    // buildOAuthRedirectUrl is now async
+    vi.mocked(buildOAuthRedirectUrl).mockResolvedValue('https://accounts.google.com/oauth?test=1')
 
     render(<AuthProbe />)
 
@@ -308,11 +331,14 @@ describe('useAuth', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'TV Sign in' }))
 
-    expect(buildOAuthRedirectUrl).toHaveBeenCalledWith(
-      'test-client-id',
-      'https://example.com/app',
-      'test-scope-1 test-scope-2'
-    )
+    // Wait for the async buildOAuthRedirectUrl to complete
+    await waitFor(() => {
+      expect(buildOAuthRedirectUrl).toHaveBeenCalledWith(
+        'test-client-id',
+        'https://example.com/app',
+        'test-scope-1 test-scope-2'
+      )
+    })
     expect(mockLocation.href).toBe('https://accounts.google.com/oauth?test=1')
 
     Object.defineProperty(window, 'location', { value: originalLocation, writable: true })

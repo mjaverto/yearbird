@@ -16,6 +16,7 @@ import {
   isToday,
   isWeekend,
   parseDateValue,
+  getDateKeyFromParts,
 } from '../../utils/dateUtils'
 import { buildGoogleCalendarCreateUrl, buildGoogleCalendarDayUrl } from '../../utils/googleCalendar'
 import type { CategoryConfig } from '../../types/categories'
@@ -44,7 +45,6 @@ interface YearGridProps {
   onReady?: () => void
 }
 
-const padDay = (value: number) => value.toString().padStart(2, '0')
 const DAY_COLUMN_COUNT = 31
 const MONTH_ROW_MIN_HEIGHT_VH = 5
 const MONTH_ROW_HEIGHT_RANGE_VH = 45
@@ -64,10 +64,6 @@ const STACK_MIN_CHARS_PER_LINE = 6
 const STACK_CHAR_WIDTH_RATIO = 0.55
 const STACK_FALLBACK_CHARS_PER_LINE = 12
 const GRID_GAP_PX = 1
-
-const getDateKey = (year: number, month: number, day: number) => {
-  return `${year}-${padDay(month)}-${padDay(day)}`
-}
 
 const getEventRange = (event: YearbirdEvent) => {
   const start = parseDateValue(event.startDate)
@@ -122,7 +118,7 @@ const buildSingleDayEventMap = (
     const current = new Date(range.start)
     while (current <= range.end) {
       if (current.getFullYear() === year) {
-        const key = getDateKey(year, current.getMonth() + 1, current.getDate())
+        const key = getDateKeyFromParts(year, current.getMonth() + 1, current.getDate())
         const existing = map.get(key)
         if (existing) {
           existing.push(event)
@@ -176,7 +172,7 @@ const buildAllDayEventMap = (
     const current = new Date(range.start)
     while (current <= range.end) {
       if (current.getFullYear() === year) {
-        const key = getDateKey(year, current.getMonth() + 1, current.getDate())
+        const key = getDateKeyFromParts(year, current.getMonth() + 1, current.getDate())
         const existing = map.get(key)
         if (existing) {
           existing.push(event)
@@ -404,7 +400,7 @@ function MonthRow({
           {Array.from({ length: DAY_COLUMN_COUNT }, (_, dayIndex) => {
             const day = dayIndex + 1
             const isValidDay = day <= daysInMonth
-            const dateKey = getDateKey(year, month + 1, day)
+            const dateKey = getDateKeyFromParts(year, month + 1, day)
             const singleDayEvents = singleDayEventsByDate.get(dateKey) ?? []
             const allDayEvents = allDayEventsByDate.get(dateKey) ?? []
             const timedEvents = timedEventsByDate?.get(dateKey) ?? []
@@ -502,7 +498,7 @@ function DayCell({
   const weekend = isWeekend(year, month, day)
   const isTodayDate = isToday(year, month, day, today)
   const isPast = isPastDate(year, month, day, today)
-  const dateKey = getDateKey(year, month + 1, day)
+  const dateKey = getDateKeyFromParts(year, month + 1, day)
   const createUrl = buildGoogleCalendarCreateUrl(year, month, day)
   const dayUrl = buildGoogleCalendarDayUrl(year, month, day)
   const hasEvents = singleDayEvents.length > 0
@@ -554,6 +550,7 @@ function DayCell({
             timedEvents={timedEvents}
             allEventsByDate={allEventsByDate}
             timedEventsByDate={allTimedEventsByDate}
+            year={year}
             categories={categories}
             googleCalendarCreateUrl={createUrl}
             googleCalendarDayUrl={dayUrl}

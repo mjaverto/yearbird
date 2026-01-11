@@ -1,11 +1,12 @@
 import { Popover, PopoverButton, PopoverPanel, CloseButton } from '@headlessui/react'
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import type { YearbirdEvent } from '../../types/calendar'
 import type { CategoryConfig } from '../../types/categories'
 import { ExternalLinkIcon } from '../icons/ExternalLinkIcon'
 import { getCategoryConfig } from '../../utils/categorize'
 import { DayColumnView } from './DayColumnView'
 import { buildGoogleCalendarCreateUrl, buildGoogleCalendarDayUrl } from '../../utils/googleCalendar'
+import { getDateKey, addDays } from '../../utils/dateUtils'
 
 interface DaySummaryPopoverProps {
   date: Date
@@ -17,6 +18,8 @@ interface DaySummaryPopoverProps {
   allEventsByDate?: Map<string, YearbirdEvent[]>
   /** Map of timed events by date key (YYYY-MM-DD) for navigation */
   timedEventsByDate?: Map<string, YearbirdEvent[]>
+  /** Year constraint for navigation boundaries */
+  year?: number
   categories: CategoryConfig[]
   googleCalendarCreateUrl: string
   googleCalendarDayUrl: string
@@ -26,19 +29,6 @@ interface DaySummaryPopoverProps {
 
 const MAX_VISIBLE_EVENTS = 6
 const DATE_FORMAT: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric', year: 'numeric' }
-
-const getDateKey = (date: Date) => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const addDays = (date: Date, days: number) => {
-  const result = new Date(date)
-  result.setDate(result.getDate() + days)
-  return result
-}
 
 /**
  * DaySummaryPopover displays a list of events for a clicked day cell.
@@ -66,6 +56,7 @@ export function DaySummaryPopover({
   timedEvents,
   allEventsByDate,
   timedEventsByDate,
+  year,
   categories,
   googleCalendarCreateUrl,
   googleCalendarDayUrl,
@@ -73,23 +64,36 @@ export function DaySummaryPopover({
   onEventClick,
 }: DaySummaryPopoverProps) {
   // Track the currently viewed date (allows navigation while popover stays open)
+  // Using date.toISOString() as key ensures state resets when popover opens on different day
   const [currentDate, setCurrentDate] = useState(date)
 
-  // Reset to initial date when the trigger date changes (popover reopened on different day)
-  useEffect(() => {
-    setCurrentDate(date)
-  }, [date])
+  // Navigation is enabled when event maps are provided
+  const canNavigate = Boolean(allEventsByDate)
+
+  // Compute year boundaries for navigation (defaults to current date's year if not provided)
+  const navigationYear = year ?? date.getFullYear()
+  const yearStart = useMemo(() => new Date(navigationYear, 0, 1), [navigationYear])
+  const yearEnd = useMemo(() => new Date(navigationYear, 11, 31), [navigationYear])
+
+  // Check if navigation is allowed in each direction
+  const canNavigatePrevious = canNavigate && currentDate > yearStart
+  const canNavigateNext = canNavigate && currentDate < yearEnd
 
   // Get events for the current viewing date
+  // FIX: When navigation is enabled, use empty array for missing dates instead of falling back to original props
   const currentDateKey = getDateKey(currentDate)
-  const currentAllDayEvents = allEventsByDate?.get(currentDateKey) ?? events
-  const currentTimedEvents = timedEventsByDate?.get(currentDateKey) ?? timedEvents ?? []
+  const currentAllDayEvents = canNavigate
+    ? (allEventsByDate?.get(currentDateKey) ?? [])
+    : events
+  const currentTimedEvents = canNavigate
+    ? (timedEventsByDate?.get(currentDateKey) ?? [])
+    : (timedEvents ?? [])
 
   // Generate URLs for current date
-  const currentCreateUrl = allEventsByDate
+  const currentCreateUrl = canNavigate
     ? buildGoogleCalendarCreateUrl(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate())
     : googleCalendarCreateUrl
-  const currentDayUrl = allEventsByDate
+  const currentDayUrl = canNavigate
     ? buildGoogleCalendarDayUrl(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate())
     : googleCalendarDayUrl
 
@@ -99,33 +103,44 @@ export function DaySummaryPopover({
   const hasOverflow = overflowCount > 0
   const hasTimedEvents = currentTimedEvents.length > 0
 
-  // Navigation is enabled when event maps are provided
-  const canNavigate = Boolean(allEventsByDate)
-
   const navigatePrevious = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation()
-    setCurrentDate((d) => addDays(d, -1))
-  }, [])
+    setCurrentDate((d) => {
+      const newDate = addDays(d, -1)
+      // Enforce year boundary
+      return newDate >= yearStart ? newDate : d
+    })
+  }, [yearStart])
 
   const navigateNext = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation()
-    setCurrentDate((d) => addDays(d, 1))
-  }, [])
+    setCurrentDate((d) => {
+      const newDate = addDays(d, 1)
+      // Enforce year boundary
+      return newDate <= yearEnd ? newDate : d
+    })
+  }, [yearEnd])
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
       if (!canNavigate) return
 
-      if (e.key === 'ArrowLeft') {
+      if (e.key === 'ArrowLeft' && canNavigatePrevious) {
         e.preventDefault()
         navigatePrevious()
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowRight' && canNavigateNext) {
         e.preventDefault()
         navigateNext()
       }
     },
-    [canNavigate, navigatePrevious, navigateNext]
+    [canNavigate, canNavigatePrevious, canNavigateNext, navigatePrevious, navigateNext]
   )
+
+  // Reset currentDate when the trigger date prop changes (handles popover key change)
+  // This is needed because useState only uses initial value on mount
+  if (currentDate.getTime() !== date.getTime() && !canNavigate) {
+    setCurrentDate(date)
+  }
 
   const handleEventClick = (
     event: YearbirdEvent,
@@ -145,8 +160,13 @@ export function DaySummaryPopover({
       <PopoverPanel
         anchor={{ to: 'right start', gap: 12, padding: 16 }}
         className="z-50 w-80 max-h-[80vh] flex flex-col rounded-lg border border-zinc-200 bg-white shadow-lg focus:outline-none"
-        onKeyDown={handleKeyDown}
       >
+        {/* Wrapper div for keyboard navigation - PopoverPanel doesn't accept tabIndex */}
+        <div
+          className="flex flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-inset"
+          onKeyDown={handleKeyDown}
+          tabIndex={0}
+        >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
           <div className="flex items-center gap-1">
@@ -154,18 +174,27 @@ export function DaySummaryPopover({
               <button
                 type="button"
                 onClick={navigatePrevious}
-                className="rounded p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                disabled={!canNavigatePrevious}
+                className="rounded p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-400"
                 aria-label="Previous day"
               >
                 <ChevronLeftIcon className="size-4" />
               </button>
             ) : null}
-            <h3 className="text-sm font-semibold text-zinc-900">{formattedDate}</h3>
+            {/* aria-live announces date changes to screen readers */}
+            <h3
+              className="text-sm font-semibold text-zinc-900"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {formattedDate}
+            </h3>
             {canNavigate ? (
               <button
                 type="button"
                 onClick={navigateNext}
-                className="rounded p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                disabled={!canNavigateNext}
+                className="rounded p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-400"
                 aria-label="Next day"
               >
                 <ChevronRightIcon className="size-4" />
@@ -259,6 +288,7 @@ export function DaySummaryPopover({
             <PlusIcon className="size-3.5" />
             New Event
           </a>
+        </div>
         </div>
       </PopoverPanel>
     </Popover>

@@ -105,3 +105,41 @@ export function formatRelativeTime(date: Date, now: Date = new Date()): string {
   if (hours < 24) return `${hours}h ago`
   return date.toLocaleDateString()
 }
+
+/**
+ * Formats a date as YYYY-MM-DD string for use as a map key.
+ * @param date - Date object to format
+ * @returns String in YYYY-MM-DD format
+ */
+export function getDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
+ * Formats year, month, day as YYYY-MM-DD string for use as a map key.
+ * @param year - Full year (e.g., 2025)
+ * @param month - 1-indexed month (1-12)
+ * @param day - Day of month (1-31)
+ * @returns String in YYYY-MM-DD format
+ */
+export function getDateKeyFromParts(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+/**
+ * Adds days to a date, handling month/year boundaries correctly.
+ * Uses UTC to avoid DST issues.
+ * @param date - Starting date
+ * @param days - Number of days to add (negative to subtract)
+ * @returns New date with days added
+ */
+export function addDays(date: Date, days: number): Date {
+  const result = new Date(date)
+  result.setDate(result.getDate() + days)
+  // Normalize to midnight to avoid DST edge cases
+  result.setHours(0, 0, 0, 0)
+  return result
+}

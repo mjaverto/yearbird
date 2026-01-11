@@ -53,7 +53,7 @@ interface InitialAuthResult {
   isReady: boolean
   authNotice: string | null
   handledOAuthCallback: boolean
-  pendingCodeExchange: { code: string; redirectUri: string } | null
+  pendingCodeExchange: { code: string; codeVerifier: string; redirectUri: string } | null
 }
 
 const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
@@ -91,13 +91,26 @@ const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
   const codeData = extractCodeFromUrl()
   if (codeData) {
     const redirectUri = window.location.origin + window.location.pathname
+    const codeVerifier = consumeCodeVerifier()
     clearQueryFromUrl()
+
+    // If no code verifier, the OAuth flow is incomplete (possible page refresh or attack)
+    if (!codeVerifier) {
+      return {
+        authState: EMPTY_STATE,
+        isReady: true,
+        authNotice: 'Sign-in failed: Missing code verifier. Please try again.',
+        handledOAuthCallback: true,
+        pendingCodeExchange: null,
+      }
+    }
+
     return {
       authState: EMPTY_STATE, // Will be updated after code exchange
       isReady: false,
       authNotice: null,
       handledOAuthCallback: true,
-      pendingCodeExchange: { code: codeData.code, redirectUri },
+      pendingCodeExchange: { code: codeData.code, codeVerifier, redirectUri },
     }
   }
 
@@ -168,14 +181,7 @@ export function useAuth() {
       return
     }
 
-    const { code, redirectUri } = initialResult.pendingCodeExchange
-    const codeVerifier = consumeCodeVerifier()
-
-    if (!codeVerifier) {
-      setAuthNotice('Sign-in failed: Missing code verifier. Please try again.')
-      setIsReady(true)
-      return
-    }
+    const { code, codeVerifier, redirectUri } = initialResult.pendingCodeExchange
 
     // Exchange the authorization code for tokens
     exchangeCodeForToken({

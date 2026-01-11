@@ -58,8 +58,6 @@ import {
 import {
   buildOAuthRedirectUrl,
   clearHashFromUrl,
-  clearQueryFromUrl,
-  consumeCodeVerifier,
   extractCodeFromUrl,
   extractErrorFromHash,
   extractErrorFromUrl,

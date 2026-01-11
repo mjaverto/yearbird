@@ -183,8 +183,14 @@ const isPopupClosed = (popup: Window | null): boolean => {
     return popup.closed
   } catch {
     // COOP policy blocked access. Assume popup is closed to avoid a stuck UI.
-    // This prioritizes keeping the sign-in flow working over preventing
-    // an occasional duplicate popup.
+    //
+    // Tradeoff analysis:
+    // - If popup is actually closed and we return false (assume open):
+    //   User cannot sign in again → stuck UI (bad)
+    // - If popup is actually open and we return true (assume closed):
+    //   User might get a duplicate popup → minor annoyance (acceptable)
+    //
+    // A stuck UI is the worse outcome, so we assume closed.
     return true
   }
 }

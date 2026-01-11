@@ -15,6 +15,7 @@
  */
 
 import { log } from './logger'
+import { generateCodeChallenge, generateCodeVerifier, generateState } from './pkce'
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const OAUTH_STATE_KEY = 'yearbird:oauthState'
@@ -31,53 +32,8 @@ export interface OAuthError {
 }
 
 // ============================================================================
-// PKCE Helpers (duplicated from auth.ts to avoid circular dependency)
-// ============================================================================
-
-/**
- * Base64URL encode (no padding, URL-safe characters)
- * @internal
- */
-function base64URLEncode(buffer: Uint8Array): string {
-  const base64 = btoa(String.fromCharCode(...buffer))
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-/**
- * Generate cryptographically random code_verifier (43-128 chars, URL-safe)
- * Using 32 bytes = 43 characters after base64url encoding
- */
-function generateCodeVerifier(): string {
-  const array = new Uint8Array(32)
-  crypto.getRandomValues(array)
-  return base64URLEncode(array)
-}
-
-/**
- * Generate code_challenge from verifier using SHA-256
- */
-async function generateCodeChallenge(verifier: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(verifier)
-  const hash = await crypto.subtle.digest('SHA-256', data)
-  return base64URLEncode(new Uint8Array(hash))
-}
-
-// ============================================================================
 // State Management
 // ============================================================================
-
-/**
- * Generates a cryptographically random state parameter for CSRF protection.
- * Falls back to Math.random if crypto API unavailable.
- */
-function generateState(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID()
-  }
-  // Fallback for older browsers
-  return Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
 
 /**
  * Stores the OAuth state parameter in sessionStorage for validation on callback.
@@ -270,7 +226,17 @@ export function hasOAuthResponse(): boolean {
 }
 
 // ============================================================================
-// Legacy Implicit Flow Support (deprecated, kept for backwards compatibility)
+// Legacy Implicit Flow Support
+// ============================================================================
+//
+// DEPRECATION NOTICE: These functions support the OAuth 2.0 implicit flow
+// which is deprecated in favor of the authorization code flow with PKCE.
+//
+// Timeline:
+// - v1.0: Implicit flow deprecated, authorization code flow is default
+// - v2.0: These functions will be removed entirely
+//
+// Migration: Use extractCodeFromUrl() + token exchange via Worker instead.
 // ============================================================================
 
 export interface TokenData {
@@ -279,8 +245,13 @@ export interface TokenData {
   scope?: string
 }
 
+// Track if we've warned about deprecated usage (only warn once per session)
+let hasWarnedImplicitFlow = false
+
 /**
  * @deprecated Use extractCodeFromUrl() instead. Implicit flow is deprecated.
+ * Will be removed in v2.0.
+ *
  * Extracts the OAuth token from the URL hash fragment.
  */
 export function extractTokenFromHash(): TokenData | null {
@@ -291,6 +262,16 @@ export function extractTokenFromHash(): TokenData | null {
   const hash = window.location.hash.slice(1) // Remove leading #
   if (!hash) {
     return null
+  }
+
+  // Warn once per session when implicit flow is actually used
+  if (!hasWarnedImplicitFlow && hash.includes('access_token')) {
+    log.warn(
+      '[DEPRECATED] OAuth implicit flow detected. ' +
+        'This flow will be removed in v2.0. ' +
+        'Please migrate to authorization code flow with PKCE.'
+    )
+    hasWarnedImplicitFlow = true
   }
 
   const params = new URLSearchParams(hash)
@@ -320,6 +301,8 @@ export function extractTokenFromHash(): TokenData | null {
 
 /**
  * @deprecated Use extractErrorFromUrl() instead. Implicit flow is deprecated.
+ * Will be removed in v2.0.
+ *
  * Extracts OAuth error information from the URL hash fragment.
  */
 export function extractErrorFromHash(): OAuthError | null {
@@ -346,7 +329,9 @@ export function extractErrorFromHash(): OAuthError | null {
 }
 
 /**
- * @deprecated Use clearQueryFromUrl() instead.
+ * @deprecated Use clearQueryFromUrl() instead. Implicit flow is deprecated.
+ * Will be removed in v2.0.
+ *
  * Clears the URL hash fragment without triggering a page reload.
  */
 export function clearHashFromUrl(): void {

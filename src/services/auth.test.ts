@@ -362,10 +362,10 @@ describe('auth service', () => {
     })
 
     it('returns true when drive scope is granted successfully', async () => {
-      let capturedCallback: ((response: { code: string; error?: string }) => void) | null = null
+      let capturedCallback: ((response: { code: string; state?: string; error?: string }) => void) | null = null
       const requestCode = vi.fn()
       const initCodeClient = vi.fn(
-        (options: { callback: (response: { code: string; error?: string }) => void }) => {
+        (options: { callback: (response: { code: string; state?: string; error?: string }) => void }) => {
           capturedCallback = options.callback
           return { requestCode }
         }
@@ -390,9 +390,13 @@ describe('auth service', () => {
       const auth = await loadAuth()
       const resultPromise = auth.requestDriveScope()
 
-      // Simulate successful code response
+      // Capture the state from the requestCode call
+      const requestCodeCalls = requestCode.mock.calls
+      const stateFromRequest = requestCodeCalls[requestCodeCalls.length - 1][0].state
+
+      // Simulate successful code response with state
       expect(capturedCallback).not.toBeNull()
-      capturedCallback!({ code: 'test-code' })
+      capturedCallback!({ code: 'test-code', state: stateFromRequest })
 
       const result = await resultPromise
       expect(result).toBe(true)
@@ -491,14 +495,20 @@ describe('auth service', () => {
 
       const resultPromise = auth.requestDriveScope()
 
+      // Capture the state from the requestCode call
+      const requestCodeCalls = requestCode.mock.calls
+      const stateFromRequest = requestCodeCalls[requestCodeCalls.length - 1][0].state
+
       // Find the callback from requestDriveScope (the second call to initCodeClient)
       const calls = initCodeClient.mock.calls
       const driveRequestCall = calls[calls.length - 1]
       const driveCallback = driveRequestCall[0].callback as (response: {
         code: string
+        state?: string
         error?: string
       }) => void
-      driveCallback({ code: 'test-code' })
+      // Pass the state back to simulate a valid OAuth callback
+      driveCallback({ code: 'test-code', state: stateFromRequest })
 
       const result = await resultPromise
       expect(result).toBe(true)
@@ -530,15 +540,21 @@ describe('auth service', () => {
       const auth = await loadAuth()
       const resultPromise = auth.requestDriveScope()
 
+      // Capture the state from the requestCode call
+      const requestCodeCalls = requestCode.mock.calls
+      const stateFromRequest = requestCodeCalls[requestCodeCalls.length - 1][0].state
+
       // Find the callback from requestDriveScope
       const calls = initCodeClient.mock.calls
       const driveRequestCall = calls[calls.length - 1]
       const driveCallback = driveRequestCall[0].callback as (response: {
         code: string
+        state?: string
         error?: string
       }) => void
 
-      driveCallback({ code: 'test-code' })
+      // Pass the state back to simulate a valid OAuth callback
+      driveCallback({ code: 'test-code', state: stateFromRequest })
 
       const result = await resultPromise
       expect(result).toBe(false)

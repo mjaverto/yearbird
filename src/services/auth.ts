@@ -1,5 +1,6 @@
 import { clearEventCaches } from './cache'
 import { exchangeCodeForToken, type TokenResponse } from './tokenExchange'
+import { generateCodeVerifier, generateState } from '../utils/pkce'
 import { log } from '../utils/logger'
 
 /** Google OAuth client ID from environment */
@@ -34,8 +35,24 @@ const ACCESS_TOKEN_KEY = 'yearbird:accessToken'
 const EXPIRES_AT_KEY = 'yearbird:expiresAt'
 const GRANTED_SCOPES_KEY = 'yearbird:grantedScopes'
 
-// PKCE code verifier is stored in memory for popup flow (no redirect)
-let currentCodeVerifier: string | null = null
+// Timing constants
+const POPUP_DETECTION_TIMEOUT_MS = 1000
+const VERIFIER_EXPIRY_MS = 5 * 60 * 1000 // 5 minutes
+
+/**
+ * PKCE verifier storage with request ID correlation.
+ * Using a Map prevents race conditions when multiple auth flows are initiated.
+ * Each entry has an expiry time to prevent memory leaks from abandoned flows.
+ */
+interface VerifierEntry {
+  verifier: string
+  state: string
+  expiresAt: number
+}
+const pendingVerifiers = new Map<string, VerifierEntry>()
+
+// Track the current pending auth flow's state (for correlating callback)
+let currentAuthState: string | null = null
 
 let codeClient: google.accounts.oauth2.CodeClient | null = null
 let successHandler: ((response: TokenResponse) => void) | null = null
@@ -50,38 +67,48 @@ type SignInStatus = 'opened' | 'focused' | 'unavailable'
 const isGoogleReady = () => typeof google !== 'undefined' && Boolean(google.accounts?.oauth2)
 const POPUP_URL_HINT = 'accounts.google.com'
 
-// ============================================================================
-// PKCE Helpers
-// ============================================================================
+// Re-export PKCE functions for backward compatibility
+export { generateCodeVerifier } from '../utils/pkce'
+export { generateCodeChallenge } from '../utils/pkce'
 
 /**
- * Base64URL encode (no padding, URL-safe characters)
+ * Store a pending verifier with expiration.
  * @internal
  */
-function base64URLEncode(buffer: Uint8Array): string {
-  const base64 = btoa(String.fromCharCode(...buffer))
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+function storePendingVerifier(state: string, verifier: string): void {
+  // Clean up expired entries
+  const now = Date.now()
+  for (const [key, entry] of pendingVerifiers.entries()) {
+    if (now >= entry.expiresAt) {
+      pendingVerifiers.delete(key)
+    }
+  }
+
+  pendingVerifiers.set(state, {
+    verifier,
+    state,
+    expiresAt: now + VERIFIER_EXPIRY_MS,
+  })
 }
 
 /**
- * Generate cryptographically random code_verifier (43-128 chars, URL-safe)
- * Using 32 bytes = 43 characters after base64url encoding
+ * Retrieve and consume a pending verifier by state.
+ * @internal
  */
-export function generateCodeVerifier(): string {
-  const array = new Uint8Array(32)
-  crypto.getRandomValues(array)
-  return base64URLEncode(array)
-}
+function consumePendingVerifier(state: string): string | null {
+  const entry = pendingVerifiers.get(state)
+  if (!entry) {
+    return null
+  }
 
-/**
- * Generate code_challenge from verifier using SHA-256
- * This is sent to Google; the verifier is sent to our Worker
- */
-export async function generateCodeChallenge(verifier: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(verifier)
-  const hash = await crypto.subtle.digest('SHA-256', data)
-  return base64URLEncode(new Uint8Array(hash))
+  pendingVerifiers.delete(state)
+
+  // Check if expired
+  if (Date.now() >= entry.expiresAt) {
+    return null
+  }
+
+  return entry.verifier
 }
 
 // ============================================================================
@@ -147,7 +174,7 @@ export function hasOpenSignInPopup() {
 export function clearSignInPopup() {
   signInPopup = null
   isAuthPopupPending = false
-  currentCodeVerifier = null
+  currentAuthState = null
   if (pendingPopupResetTimeout !== null) {
     window.clearTimeout(pendingPopupResetTimeout)
     pendingPopupResetTimeout = null
@@ -164,6 +191,23 @@ export function hasClientId() {
 
 /**
  * Initialize the Google OAuth code client for authorization code flow with PKCE.
+ *
+ * ## PKCE Limitation with GIS
+ *
+ * Google Identity Services (GIS) `initCodeClient` does not support passing
+ * `code_challenge` and `code_challenge_method` parameters directly. For the
+ * popup flow with `postmessage` redirect, GIS handles the OAuth flow internally.
+ *
+ * While we generate and send a `code_verifier` during token exchange, Google's
+ * authorization server cannot verify it without the corresponding `code_challenge`.
+ * This means PKCE validation is not enforced by Google for the popup flow.
+ *
+ * However, the popup flow still has security protections:
+ * 1. **Origin verification**: GIS validates the requesting origin
+ * 2. **postmessage channel**: Auth code is sent via postMessage to the opener
+ * 3. **Short-lived codes**: Authorization codes expire quickly
+ *
+ * For the redirect flow (TV mode), PKCE is fully implemented and verified.
  *
  * @param onSuccess - Callback when token exchange succeeds
  * @param onError - Callback when auth fails
@@ -192,16 +236,29 @@ export function initializeAuth(
     scope: ALL_SCOPES,
     ux_mode: 'popup',
     redirect_uri: 'postmessage', // Required for popup mode
-    callback: async (response) => {
+    callback: async (response: google.accounts.oauth2.CodeResponse) => {
       if (response.error) {
         log.error('Auth error:', response.error)
-        currentCodeVerifier = null
+        currentAuthState = null
         errorHandler?.(response.error)
         return
       }
 
-      if (!currentCodeVerifier) {
-        log.error('No code verifier available')
+      // Validate state parameter for CSRF protection
+      const returnedState = response.state
+      if (currentAuthState && returnedState !== currentAuthState) {
+        log.error('Auth state mismatch - possible CSRF attack')
+        currentAuthState = null
+        errorHandler?.('state_mismatch')
+        return
+      }
+
+      // Get the verifier for this auth flow
+      const codeVerifier = returnedState ? consumePendingVerifier(returnedState) : null
+
+      if (!codeVerifier) {
+        log.error('No code verifier available for state:', returnedState)
+        currentAuthState = null
         errorHandler?.('no_code_verifier')
         return
       }
@@ -210,20 +267,20 @@ export function initializeAuth(
         // Exchange code for token via Worker
         const tokenResponse = await exchangeCodeForToken({
           code: response.code,
-          codeVerifier: currentCodeVerifier,
+          codeVerifier,
           redirectUri: 'postmessage',
         })
-        currentCodeVerifier = null
+        currentAuthState = null
         successHandler?.(tokenResponse)
       } catch (error) {
         log.error('Token exchange failed:', error)
-        currentCodeVerifier = null
+        currentAuthState = null
         errorHandler?.('token_exchange_failed')
       }
     },
-    error_callback: (error) => {
+    error_callback: (error: google.accounts.oauth2.CodeError) => {
       log.error('Auth error callback:', error)
-      currentCodeVerifier = null
+      currentAuthState = null
       errorHandler?.(error.type)
     },
   })
@@ -262,18 +319,24 @@ export async function signIn(): Promise<SignInStatus> {
     pendingPopupResetTimeout = window.setTimeout(() => {
       isAuthPopupPending = false
       pendingPopupResetTimeout = null
-    }, 1000)
+    }, POPUP_DETECTION_TIMEOUT_MS)
   }
 
-  // Generate PKCE code verifier for the token exchange
-  // Note: For GIS popup flow with 'postmessage' redirect_uri, we don't need to send
-  // code_challenge upfront. The code_verifier is sent during token exchange via our Worker.
-  currentCodeVerifier = generateCodeVerifier()
+  // Generate PKCE code verifier and state
+  const codeVerifier = generateCodeVerifier()
+  const state = generateState()
+
+  // Store verifier correlated with state for later retrieval
+  storePendingVerifier(state, codeVerifier)
+  currentAuthState = state
 
   // Request authorization code
+  // Note: GIS initCodeClient doesn't support code_challenge parameter directly.
+  // The code_verifier will be sent during token exchange, but Google cannot
+  // verify it without the challenge. See initializeAuth docs for details.
   codeClient.requestCode({
     hint: '', // Allow account selection
-    state: crypto.randomUUID(), // CSRF protection
+    state, // CSRF protection
   })
 
   return 'opened'
@@ -283,7 +346,7 @@ export function signOut() {
   const token = sessionStorage.getItem(ACCESS_TOKEN_KEY)
   if (token && typeof google !== 'undefined' && google.accounts?.oauth2) {
     google.accounts.oauth2.revoke(token, () => {
-      console.info('Token revoked')
+      log.info('Token revoked')
     })
   }
   clearStoredAuth()
@@ -374,15 +437,33 @@ export async function requestDriveScope(): Promise<boolean> {
 
   return new Promise((resolve) => {
     const verifier = generateCodeVerifier()
+    const state = generateState()
+
+    // Store verifier for this request
+    storePendingVerifier(state, verifier)
 
     const client = google.accounts.oauth2.initCodeClient({
       client_id: CLIENT_ID,
       scope: ALL_SCOPES,
       ux_mode: 'popup',
       redirect_uri: 'postmessage',
-      callback: async (response) => {
+      callback: async (response: google.accounts.oauth2.CodeResponse) => {
         if (response.error) {
           log.error('Drive scope request failed:', response.error)
+          resolve(false)
+          return
+        }
+
+        // Validate state
+        if (response.state !== state) {
+          log.error('Drive scope request state mismatch')
+          resolve(false)
+          return
+        }
+
+        const codeVerifier = consumePendingVerifier(state)
+        if (!codeVerifier) {
+          log.error('No verifier for drive scope request')
           resolve(false)
           return
         }
@@ -390,7 +471,7 @@ export async function requestDriveScope(): Promise<boolean> {
         try {
           const tokenResponse = await exchangeCodeForToken({
             code: response.code,
-            codeVerifier: verifier,
+            codeVerifier,
             redirectUri: 'postmessage',
           })
 
@@ -410,7 +491,7 @@ export async function requestDriveScope(): Promise<boolean> {
           resolve(false)
         }
       },
-      error_callback: (error) => {
+      error_callback: (error: google.accounts.oauth2.CodeError) => {
         log.error('Drive scope request error:', error)
         resolve(false)
       },
@@ -418,11 +499,7 @@ export async function requestDriveScope(): Promise<boolean> {
 
     // Request with consent prompt to ensure the user sees the new scope
     ensureOpenPatched()
-
-    // Generate challenge for PKCE (used in token exchange)
-    generateCodeChallenge(verifier).then(() => {
-      client.requestCode({ prompt: 'consent' })
-    })
+    client.requestCode({ prompt: 'consent', state })
   })
 }
 

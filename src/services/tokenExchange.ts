@@ -12,7 +12,7 @@ const WORKER_URL = import.meta.env.VITE_OAUTH_WORKER_URL as string | undefined
 
 interface ExchangeParams {
   code: string
-  codeVerifier: string
+  codeVerifier?: string // Optional - only used for redirect flow with PKCE
   redirectUri: string
 }
 
@@ -44,14 +44,18 @@ export async function exchangeCodeForToken(params: ExchangeParams): Promise<Toke
 
   log.debug('Exchanging auth code for token')
 
+  // Build request body - only include code_verifier if provided (PKCE redirect flow)
+  // Maintain key order for consistency: code, code_verifier (optional), redirect_uri
+  const requestBody: Record<string, string> = { code: params.code }
+  if (params.codeVerifier) {
+    requestBody.code_verifier = params.codeVerifier
+  }
+  requestBody.redirect_uri = params.redirectUri
+
   const response = await fetch(WORKER_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      code: params.code,
-      code_verifier: params.codeVerifier,
-      redirect_uri: params.redirectUri,
-    }),
+    body: JSON.stringify(requestBody),
   })
 
   if (!response.ok) {

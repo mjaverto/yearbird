@@ -168,7 +168,8 @@ describe('tokenExchange', () => {
       ).rejects.toThrow('Network error')
     })
 
-    it('sends postmessage as redirect_uri for GIS popup flow', async () => {
+    it('omits code_verifier for GIS popup flow (postmessage)', async () => {
+      // GIS popup flow doesn't support PKCE, so we omit code_verifier
       import.meta.env.VITE_OAUTH_WORKER_URL = mockWorkerUrl
 
       const mockTokenResponse = {
@@ -188,7 +189,7 @@ describe('tokenExchange', () => {
 
       await exchangeCodeForToken({
         code: 'test-auth-code',
-        codeVerifier: 'test-verifier',
+        // codeVerifier omitted - GIS popup flow
         redirectUri: 'postmessage',
       })
 
@@ -197,7 +198,7 @@ describe('tokenExchange', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code: 'test-auth-code',
-          code_verifier: 'test-verifier',
+          // No code_verifier - GIS popup flow doesn't support PKCE
           redirect_uri: 'postmessage',
         }),
       })

@@ -256,23 +256,22 @@ export function initializeAuth(
         return
       }
 
-      // Get the verifier for this auth flow
-      // Use returnedState if available, otherwise fall back to currentAuthState
+      // Note: GIS popup flow does NOT support PKCE because initCodeClient
+      // doesn't allow passing code_challenge to Google's authorization endpoint.
+      // We still generate a verifier for state correlation, but we don't send it
+      // to Google during token exchange (they would reject it with "invalid_grant").
+      // The popup flow has other security protections (origin verification, postmessage).
       const stateForVerifier = returnedState ?? currentAuthState
-      const codeVerifier = stateForVerifier ? consumePendingVerifier(stateForVerifier) : null
-
-      if (!codeVerifier) {
-        log.error('No code verifier available for state:', stateForVerifier)
-        currentAuthState = null
-        errorHandler?.('no_code_verifier')
-        return
+      if (stateForVerifier) {
+        // Clean up the stored verifier even though we don't use it
+        consumePendingVerifier(stateForVerifier)
       }
 
       try {
-        // Exchange code for token via Worker
+        // Exchange code for token via Worker (no code_verifier for popup flow)
         const tokenResponse = await exchangeCodeForToken({
           code: response.code,
-          codeVerifier,
+          // codeVerifier omitted - GIS popup flow doesn't support PKCE
           redirectUri: 'postmessage',
         })
         currentAuthState = null

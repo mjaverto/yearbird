@@ -102,11 +102,13 @@ export function DaySummaryPopover({
   // Navigation is enabled when event maps are provided
   const canNavigate = Boolean(allEventsByDate)
 
-  const navigatePrevious = useCallback(() => {
+  const navigatePrevious = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation()
     setCurrentDate((d) => addDays(d, -1))
   }, [])
 
-  const navigateNext = useCallback(() => {
+  const navigateNext = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation()
     setCurrentDate((d) => addDays(d, 1))
   }, [])
 

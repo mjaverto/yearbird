@@ -11,11 +11,24 @@ vi.mock('../utils/logger', () => ({
   },
 }))
 
+// Mock the token exchange service
+const mockExchangeCodeForToken = vi.fn()
+vi.mock('./tokenExchange', () => ({
+  exchangeCodeForToken: mockExchangeCodeForToken,
+}))
+
 type GoogleStub = {
   accounts: {
     oauth2: {
-      initTokenClient: (options: { client_id: string; scope: string; callback: (response: unknown) => void }) => {
-        requestAccessToken: () => void
+      initCodeClient: (options: {
+        client_id: string
+        scope: string
+        ux_mode: string
+        redirect_uri: string
+        callback: (response: { code: string; error?: string }) => void
+        error_callback?: (error: { type: string }) => void
+      }) => {
+        requestCode: (options?: { hint?: string; state?: string; prompt?: string }) => void
       }
       revoke: (token: string, done: () => void) => void
     }
@@ -34,6 +47,7 @@ describe('auth service', () => {
     sessionStorage.clear()
     globalWithGoogle.google = undefined
     mockLogError.mockClear()
+    mockExchangeCodeForToken.mockReset()
   })
 
   it('reports whether a client id is configured', async () => {
@@ -42,14 +56,14 @@ describe('auth service', () => {
     expect(auth.hasClientId()).toBe(Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID))
   })
 
-  it('initializes token client when google is ready', async () => {
-    const requestAccessToken = vi.fn()
-    const initTokenClient = vi.fn(() => ({ requestAccessToken }))
+  it('initializes code client when google is ready', async () => {
+    const requestCode = vi.fn()
+    const initCodeClient = vi.fn(() => ({ requestCode }))
 
     globalWithGoogle.google = {
       accounts: {
         oauth2: {
-          initTokenClient,
+          initCodeClient,
           revoke: vi.fn(),
         },
       },
@@ -59,7 +73,7 @@ describe('auth service', () => {
     const onSuccess = vi.fn()
 
     expect(auth.initializeAuth(onSuccess)).toBe(true)
-    expect(initTokenClient).toHaveBeenCalled()
+    expect(initCodeClient).toHaveBeenCalled()
   })
 
   it('stores auth tokens', async () => {
@@ -120,13 +134,13 @@ describe('auth service', () => {
     expect(sessionStorage.getItem('yearbird:accessToken')).toBeNull()
   })
 
-  it('signs in using the token client', async () => {
-    const requestAccessToken = vi.fn()
-    const initTokenClient = vi.fn(() => ({ requestAccessToken }))
+  it('signs in using the code client', async () => {
+    const requestCode = vi.fn()
+    const initCodeClient = vi.fn(() => ({ requestCode }))
     globalWithGoogle.google = {
       accounts: {
         oauth2: {
-          initTokenClient,
+          initCodeClient,
           revoke: vi.fn(),
         },
       },
@@ -134,24 +148,24 @@ describe('auth service', () => {
 
     const auth = await loadAuth()
     auth.initializeAuth(() => {})
-    auth.signIn()
+    await auth.signIn()
 
-    expect(requestAccessToken).toHaveBeenCalled()
+    expect(requestCode).toHaveBeenCalled()
   })
 
   it('focuses an existing sign-in popup instead of opening a new one', async () => {
     const popup = { closed: false, focus: vi.fn() } as unknown as Window
     const originalOpen = window.open
     window.open = vi.fn(() => popup)
-    const requestAccessToken = vi.fn(() => {
+    const requestCode = vi.fn(() => {
       window.open('https://accounts.google.com', 'yearbird-google-auth')
     })
-    const initTokenClient = vi.fn(() => ({ requestAccessToken }))
+    const initCodeClient = vi.fn(() => ({ requestCode }))
 
     globalWithGoogle.google = {
       accounts: {
         oauth2: {
-          initTokenClient,
+          initCodeClient,
           revoke: vi.fn(),
         },
       },
@@ -160,11 +174,11 @@ describe('auth service', () => {
     const auth = await loadAuth()
     auth.initializeAuth(() => {})
 
-    auth.signIn()
+    await auth.signIn()
     window.open('https://accounts.google.com', 'yearbird-google-auth')
     expect(auth.hasOpenSignInPopup()).toBe(true)
 
-    auth.signIn()
+    await auth.signIn()
 
     expect(popup.focus).toHaveBeenCalled()
     window.open = originalOpen
@@ -175,7 +189,7 @@ describe('auth service', () => {
     globalWithGoogle.google = {
       accounts: {
         oauth2: {
-          initTokenClient: vi.fn(() => ({ requestAccessToken: vi.fn() })),
+          initCodeClient: vi.fn(() => ({ requestCode: vi.fn() })),
           revoke,
         },
       },
@@ -190,7 +204,6 @@ describe('auth service', () => {
 
     expect(revoke).toHaveBeenCalled()
     expect(sessionStorage.getItem('yearbird:accessToken')).toBeNull()
-    // Note: event caches are no longer stored in sessionStorage (caching disabled)
   })
 
   it('clears stored auth explicitly including scopes', async () => {
@@ -204,15 +217,14 @@ describe('auth service', () => {
 
     expect(sessionStorage.getItem('yearbird:accessToken')).toBeNull()
     expect(sessionStorage.getItem('yearbird:grantedScopes')).toBeNull()
-    // Note: event caches are no longer stored in sessionStorage (caching disabled)
   })
 
   it('signIn returns unavailable when not initialized', async () => {
-    // No google stub set, so tokenClient will be null
+    // No google stub set, so codeClient will be null
     globalWithGoogle.google = undefined
 
     const auth = await loadAuth()
-    const result = auth.signIn()
+    const result = await auth.signIn()
 
     expect(result).toBe('unavailable')
   })
@@ -236,15 +248,15 @@ describe('auth service', () => {
     const popup = { closed: false, focus: vi.fn() } as unknown as Window
     const originalOpen = window.open
     window.open = vi.fn(() => popup)
-    const requestAccessToken = vi.fn(() => {
+    const requestCode = vi.fn(() => {
       window.open('https://accounts.google.com', 'yearbird-google-auth')
     })
-    const initTokenClient = vi.fn(() => ({ requestAccessToken }))
+    const initCodeClient = vi.fn(() => ({ requestCode }))
 
     globalWithGoogle.google = {
       accounts: {
         oauth2: {
-          initTokenClient,
+          initCodeClient,
           revoke: vi.fn(),
         },
       },
@@ -252,7 +264,7 @@ describe('auth service', () => {
 
     const auth = await loadAuth()
     auth.initializeAuth(() => {})
-    auth.signIn()
+    await auth.signIn()
 
     // Popup should now be tracked
     expect(auth.hasOpenSignInPopup()).toBe(true)
@@ -270,15 +282,15 @@ describe('auth service', () => {
     const popup = { closed: false, focus: vi.fn() } as unknown as Window & { closed: boolean }
     const originalOpen = window.open
     window.open = vi.fn(() => popup)
-    const requestAccessToken = vi.fn(() => {
+    const requestCode = vi.fn(() => {
       window.open('https://accounts.google.com', 'yearbird-google-auth')
     })
-    const initTokenClient = vi.fn(() => ({ requestAccessToken }))
+    const initCodeClient = vi.fn(() => ({ requestCode }))
 
     globalWithGoogle.google = {
       accounts: {
         oauth2: {
-          initTokenClient,
+          initCodeClient,
           revoke: vi.fn(),
         },
       },
@@ -286,7 +298,7 @@ describe('auth service', () => {
 
     const auth = await loadAuth()
     auth.initializeAuth(() => {})
-    auth.signIn()
+    await auth.signIn()
 
     // Popup should be tracked
     expect(auth.hasOpenSignInPopup()).toBe(true)
@@ -304,16 +316,16 @@ describe('auth service', () => {
     const popup = { closed: false, focus: vi.fn() } as unknown as Window
     const originalOpen = window.open
     window.open = vi.fn(() => popup)
-    const requestAccessToken = vi.fn(() => {
+    const requestCode = vi.fn(() => {
       // First, open a non-Google popup (should not be captured)
       window.open('https://example.com', 'other-popup')
     })
-    const initTokenClient = vi.fn(() => ({ requestAccessToken }))
+    const initCodeClient = vi.fn(() => ({ requestCode }))
 
     globalWithGoogle.google = {
       accounts: {
         oauth2: {
-          initTokenClient,
+          initCodeClient,
           revoke: vi.fn(),
         },
       },
@@ -321,12 +333,9 @@ describe('auth service', () => {
 
     const auth = await loadAuth()
     auth.initializeAuth(() => {})
-    auth.signIn()
+    await auth.signIn()
 
     // Non-Google popup should not be captured as sign-in popup
-    // (hasOpenSignInPopup will be false because URL doesn't match)
-    // But since we're mocking, we need to test a different scenario
-    // Actually, let's test that after clearSignInPopup, attempting signIn opens new popup
     auth.clearSignInPopup()
     expect(auth.hasOpenSignInPopup()).toBe(false)
 
@@ -335,19 +344,6 @@ describe('auth service', () => {
 
   describe('requestDriveScope', () => {
     it('returns false when CLIENT_ID is missing', async () => {
-      // When google is not set up and CLIENT_ID would be undefined
-      // We need to mock the module to have no CLIENT_ID
-      vi.doMock('./auth', async (importOriginal) => {
-        const original = await importOriginal<typeof import('./auth')>()
-        return {
-          ...original,
-          CLIENT_ID: undefined,
-        }
-      })
-
-      // For this test, we rely on the actual module behavior
-      // CLIENT_ID is defined via import.meta.env, so we test the flow
-      // when google is not ready (similar outcome)
       globalWithGoogle.google = undefined
 
       const auth = await loadAuth()
@@ -366,49 +362,60 @@ describe('auth service', () => {
     })
 
     it('returns true when drive scope is granted successfully', async () => {
-      let capturedCallback: ((response: unknown) => void) | null = null
-      const requestAccessToken = vi.fn()
-      const initTokenClient = vi.fn((options: { callback: (response: unknown) => void }) => {
-        capturedCallback = options.callback
-        return { requestAccessToken }
-      })
+      let capturedCallback: ((response: { code: string; state?: string; error?: string }) => void) | null = null
+      const requestCode = vi.fn()
+      const initCodeClient = vi.fn(
+        (options: { callback: (response: { code: string; state?: string; error?: string }) => void }) => {
+          capturedCallback = options.callback
+          return { requestCode }
+        }
+      )
 
       globalWithGoogle.google = {
         accounts: {
           oauth2: {
-            initTokenClient,
+            initCodeClient,
             revoke: vi.fn(),
           },
         },
       }
 
-      const auth = await loadAuth()
-      const resultPromise = auth.requestDriveScope()
-
-      // Simulate successful response with drive scope granted
-      expect(capturedCallback).not.toBeNull()
-      capturedCallback!({
+      // Mock successful token exchange
+      mockExchangeCodeForToken.mockResolvedValue({
         access_token: 'new-token',
         expires_in: 3600,
         scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
       })
+
+      const auth = await loadAuth()
+      const resultPromise = auth.requestDriveScope()
+
+      // Capture the state from the requestCode call
+      const requestCodeCalls = requestCode.mock.calls
+      const stateFromRequest = requestCodeCalls[requestCodeCalls.length - 1][0].state
+
+      // Simulate successful code response with state
+      expect(capturedCallback).not.toBeNull()
+      capturedCallback!({ code: 'test-code', state: stateFromRequest })
 
       const result = await resultPromise
       expect(result).toBe(true)
     })
 
     it('returns false when response contains error', async () => {
-      let capturedCallback: ((response: unknown) => void) | null = null
-      const requestAccessToken = vi.fn()
-      const initTokenClient = vi.fn((options: { callback: (response: unknown) => void }) => {
-        capturedCallback = options.callback
-        return { requestAccessToken }
-      })
+      let capturedCallback: ((response: { code: string; error?: string }) => void) | null = null
+      const requestCode = vi.fn()
+      const initCodeClient = vi.fn(
+        (options: { callback: (response: { code: string; error?: string }) => void }) => {
+          capturedCallback = options.callback
+          return { requestCode }
+        }
+      )
 
       globalWithGoogle.google = {
         accounts: {
           oauth2: {
-            initTokenClient,
+            initCodeClient,
             revoke: vi.fn(),
           },
         },
@@ -419,9 +426,7 @@ describe('auth service', () => {
 
       // Simulate error response
       expect(capturedCallback).not.toBeNull()
-      capturedCallback!({
-        error: 'access_denied',
-      })
+      capturedCallback!({ code: '', error: 'access_denied' })
 
       const result = await resultPromise
       expect(result).toBe(false)
@@ -429,19 +434,22 @@ describe('auth service', () => {
     })
 
     it('returns false when error_callback is invoked', async () => {
-      let capturedErrorCallback: ((error: unknown) => void) | null = null
-      const requestAccessToken = vi.fn()
-      const initTokenClient = vi.fn(
-        (options: { callback: (response: unknown) => void; error_callback: (error: unknown) => void }) => {
+      let capturedErrorCallback: ((error: { type: string }) => void) | null = null
+      const requestCode = vi.fn()
+      const initCodeClient = vi.fn(
+        (options: {
+          callback: (response: { code: string; error?: string }) => void
+          error_callback: (error: { type: string }) => void
+        }) => {
           capturedErrorCallback = options.error_callback
-          return { requestAccessToken }
+          return { requestCode }
         }
       )
 
       globalWithGoogle.google = {
         accounts: {
           oauth2: {
-            initTokenClient,
+            initCodeClient,
             revoke: vi.fn(),
           },
         },
@@ -460,19 +468,26 @@ describe('auth service', () => {
     })
 
     it('calls successHandler when set and scope granted', async () => {
-      const requestAccessToken = vi.fn()
-      const initTokenClient = vi.fn(() => {
-        return { requestAccessToken }
+      const requestCode = vi.fn()
+      const initCodeClient = vi.fn(() => {
+        return { requestCode }
       })
 
       globalWithGoogle.google = {
         accounts: {
           oauth2: {
-            initTokenClient,
+            initCodeClient,
             revoke: vi.fn(),
           },
         },
       }
+
+      const mockResponse = {
+        access_token: 'new-token',
+        expires_in: 3600,
+        scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
+      }
+      mockExchangeCodeForToken.mockResolvedValue(mockResponse)
 
       const auth = await loadAuth()
       const successHandler = vi.fn()
@@ -480,17 +495,20 @@ describe('auth service', () => {
 
       const resultPromise = auth.requestDriveScope()
 
-      const mockResponse = {
-        access_token: 'new-token',
-        expires_in: 3600,
-        scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
-      }
+      // Capture the state from the requestCode call
+      const requestCodeCalls = requestCode.mock.calls
+      const stateFromRequest = requestCodeCalls[requestCodeCalls.length - 1][0].state
 
-      // Find the callback from requestDriveScope (the second call to initTokenClient)
-      const calls = initTokenClient.mock.calls
+      // Find the callback from requestDriveScope (the second call to initCodeClient)
+      const calls = initCodeClient.mock.calls
       const driveRequestCall = calls[calls.length - 1]
-      const driveCallback = driveRequestCall[0].callback as (response: unknown) => void
-      driveCallback(mockResponse)
+      const driveCallback = driveRequestCall[0].callback as (response: {
+        code: string
+        state?: string
+        error?: string
+      }) => void
+      // Pass the state back to simulate a valid OAuth callback
+      driveCallback({ code: 'test-code', state: stateFromRequest })
 
       const result = await resultPromise
       expect(result).toBe(true)
@@ -498,34 +516,45 @@ describe('auth service', () => {
     })
 
     it('returns false when drive scope is not in response', async () => {
-      const requestAccessToken = vi.fn()
-      const initTokenClient = vi.fn(() => {
-        return { requestAccessToken }
+      const requestCode = vi.fn()
+      const initCodeClient = vi.fn(() => {
+        return { requestCode }
       })
 
       globalWithGoogle.google = {
         accounts: {
           oauth2: {
-            initTokenClient,
+            initCodeClient,
             revoke: vi.fn(),
           },
         },
       }
 
-      const auth = await loadAuth()
-      const resultPromise = auth.requestDriveScope()
-
-      // Find the callback from requestDriveScope
-      const calls = initTokenClient.mock.calls
-      const driveRequestCall = calls[calls.length - 1]
-      const driveCallback = driveRequestCall[0].callback as (response: unknown) => void
-
-      // Simulate response where user only granted calendar scope (declined drive)
-      driveCallback({
+      // Mock response where user only granted calendar scope (declined drive)
+      mockExchangeCodeForToken.mockResolvedValue({
         access_token: 'new-token',
         expires_in: 3600,
         scope: 'https://www.googleapis.com/auth/calendar.readonly',
       })
+
+      const auth = await loadAuth()
+      const resultPromise = auth.requestDriveScope()
+
+      // Capture the state from the requestCode call
+      const requestCodeCalls = requestCode.mock.calls
+      const stateFromRequest = requestCodeCalls[requestCodeCalls.length - 1][0].state
+
+      // Find the callback from requestDriveScope
+      const calls = initCodeClient.mock.calls
+      const driveRequestCall = calls[calls.length - 1]
+      const driveCallback = driveRequestCall[0].callback as (response: {
+        code: string
+        state?: string
+        error?: string
+      }) => void
+
+      // Pass the state back to simulate a valid OAuth callback
+      driveCallback({ code: 'test-code', state: stateFromRequest })
 
       const result = await resultPromise
       expect(result).toBe(false)

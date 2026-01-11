@@ -10,14 +10,19 @@ import {
   signOut,
   storeAuth,
   CLIENT_ID,
-  SCOPES,
+  ALL_SCOPES,
 } from '../services/auth'
+import { exchangeCodeForToken, type TokenResponse } from '../services/tokenExchange'
 import type { AuthState } from '../types/auth'
 import { isFixtureMode } from '../utils/env'
 import {
   buildOAuthRedirectUrl,
   clearHashFromUrl,
+  clearQueryFromUrl,
+  consumeCodeVerifier,
+  extractCodeFromUrl,
   extractErrorFromHash,
+  extractErrorFromUrl,
   extractTokenFromHash,
 } from '../utils/manualOAuth'
 import {
@@ -48,6 +53,7 @@ interface InitialAuthResult {
   isReady: boolean
   authNotice: string | null
   handledOAuthCallback: boolean
+  pendingCodeExchange: { code: string; codeVerifier: string; redirectUri: string } | null
 }
 
 const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
@@ -57,13 +63,18 @@ const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
       isReady: true,
       authNotice: null,
       handledOAuthCallback: false,
+      pendingCodeExchange: null,
     }
   }
 
-  // Check for OAuth error in URL hash (redirect flow callback)
-  const oauthError = extractErrorFromHash()
+  // Check for OAuth error in URL query (auth code flow) or hash (legacy implicit flow)
+  const oauthErrorQuery = extractErrorFromUrl()
+  const oauthErrorHash = extractErrorFromHash()
+  const oauthError = oauthErrorQuery ?? oauthErrorHash
+
   if (oauthError) {
-    clearHashFromUrl()
+    if (oauthErrorQuery) clearQueryFromUrl()
+    if (oauthErrorHash) clearHashFromUrl()
     return {
       authState: EMPTY_STATE,
       isReady: true,
@@ -72,10 +83,38 @@ const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
           ? 'Sign-in cancelled. Try again when ready.'
           : `Sign-in failed: ${oauthError.errorDescription ?? oauthError.error}`,
       handledOAuthCallback: true,
+      pendingCodeExchange: null,
     }
   }
 
-  // Check for OAuth token in URL hash (redirect flow callback)
+  // Check for authorization code in URL query (auth code flow)
+  const codeData = extractCodeFromUrl()
+  if (codeData) {
+    const redirectUri = window.location.origin + window.location.pathname
+    const codeVerifier = consumeCodeVerifier()
+    clearQueryFromUrl()
+
+    // If no code verifier, the OAuth flow is incomplete (possible page refresh or attack)
+    if (!codeVerifier) {
+      return {
+        authState: EMPTY_STATE,
+        isReady: true,
+        authNotice: 'Sign-in failed: Missing code verifier. Please try again.',
+        handledOAuthCallback: true,
+        pendingCodeExchange: null,
+      }
+    }
+
+    return {
+      authState: EMPTY_STATE, // Will be updated after code exchange
+      isReady: false,
+      authNotice: null,
+      handledOAuthCallback: true,
+      pendingCodeExchange: { code: codeData.code, codeVerifier, redirectUri },
+    }
+  }
+
+  // Check for OAuth token in URL hash (legacy implicit flow - kept for backwards compat)
   const tokenData = extractTokenFromHash()
   if (tokenData) {
     const expiresAt = storeAuth(tokenData.accessToken, tokenData.expiresIn, tokenData.scope)
@@ -90,6 +129,7 @@ const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
       isReady: true,
       authNotice: null,
       handledOAuthCallback: true,
+      pendingCodeExchange: null,
     }
   }
 
@@ -106,6 +146,7 @@ const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
       isReady: false,
       authNotice: null,
       handledOAuthCallback: false,
+      pendingCodeExchange: null,
     }
   }
 
@@ -114,6 +155,7 @@ const getInitialAuthState = (fixtureMode: boolean): InitialAuthResult => {
     isReady: false,
     authNotice: null,
     handledOAuthCallback: false,
+    pendingCodeExchange: null,
   }
 }
 
@@ -133,21 +175,48 @@ export function useAuth() {
   // Track if GIS is unavailable (typed flag instead of string matching)
   const [isGisUnavailable, setIsGisUnavailable] = useState(false)
 
+  // Handle pending authorization code exchange (TV mode redirect flow)
+  useEffect(() => {
+    if (fixtureMode || !initialResult.pendingCodeExchange) {
+      return
+    }
+
+    const { code, codeVerifier, redirectUri } = initialResult.pendingCodeExchange
+
+    // Exchange the authorization code for tokens
+    exchangeCodeForToken({
+      code,
+      codeVerifier,
+      redirectUri,
+    })
+      .then((tokenResponse) => {
+        const expiresAt = storeAuth(
+          tokenResponse.access_token,
+          tokenResponse.expires_in,
+          tokenResponse.scope,
+        )
+        setAuthState({
+          isAuthenticated: true,
+          user: null,
+          accessToken: tokenResponse.access_token,
+          expiresAt,
+        })
+        setIsReady(true)
+        setAuthNotice(null)
+      })
+      .catch((error) => {
+        console.error('Token exchange failed:', error)
+        setAuthNotice('Sign-in failed. Please try again.')
+        setIsReady(true)
+      })
+  }, [fixtureMode, initialResult.pendingCodeExchange])
+
   useEffect(() => {
     if (fixtureMode) {
       return
     }
 
-    const handleTokenResponse = (response: google.accounts.oauth2.TokenResponse) => {
-      if (response.error) {
-        clearStoredAuth()
-        clearSignInPopup()
-        setAuthState(EMPTY_STATE)
-        setIsSigningIn(false)
-        setAuthNotice('Sign-in failed. Try again.')
-        return
-      }
-
+    const handleTokenResponse = (response: TokenResponse) => {
       const expiresAt = storeAuth(response.access_token, response.expires_in, response.scope)
       clearSignInPopup()
       setAuthState({
@@ -160,6 +229,18 @@ export function useAuth() {
       setAuthNotice(null)
     }
 
+    const handleAuthError = (error: string) => {
+      clearStoredAuth()
+      clearSignInPopup()
+      setAuthState(EMPTY_STATE)
+      setIsSigningIn(false)
+      if (error === 'popup_closed') {
+        // User closed popup - not an error worth showing
+        return
+      }
+      setAuthNotice('Sign-in failed. Try again.')
+    }
+
     let intervalId: number | undefined
     const tryInitialize = () => {
       if (!hasClientId()) {
@@ -167,7 +248,7 @@ export function useAuth() {
         return true
       }
 
-      const ready = initializeAuth(handleTokenResponse)
+      const ready = initializeAuth(handleTokenResponse, handleAuthError)
       if (ready) {
         setIsReady(true)
         setAuthNotice(null)
@@ -251,7 +332,7 @@ export function useAuth() {
     return () => window.clearTimeout(timeoutId)
   }, [authState.expiresAt, fixtureMode])
 
-  const handleSignIn = useCallback(() => {
+  const handleSignIn = useCallback(async () => {
     if (fixtureMode) {
       return
     }
@@ -260,7 +341,7 @@ export function useAuth() {
       return
     }
     setAuthNotice(null)
-    const status = signIn()
+    const status = await signIn()
     if (status === 'unavailable') {
       setIsSigningIn(false)
       setIsGisUnavailable(true)
@@ -283,7 +364,7 @@ export function useAuth() {
   }, [fixtureMode])
 
   // TV Mode sign-in: redirect to Google OAuth (no popup)
-  const handleTvSignIn = useCallback(() => {
+  const handleTvSignIn = useCallback(async () => {
     if (fixtureMode) {
       return
     }
@@ -295,7 +376,7 @@ export function useAuth() {
 
     setAuthNotice(null)
     const redirectUri = window.location.origin + window.location.pathname
-    const url = buildOAuthRedirectUrl(CLIENT_ID, redirectUri, SCOPES)
+    const url = await buildOAuthRedirectUrl(CLIENT_ID, redirectUri, ALL_SCOPES)
     window.location.href = url
   }, [fixtureMode])
 

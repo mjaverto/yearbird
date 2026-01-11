@@ -1,4 +1,6 @@
 import { clearEventCaches } from './cache'
+import { exchangeCodeForToken, type TokenResponse } from './tokenExchange'
+import { generateCodeVerifier, generateState } from '../utils/pkce'
 import { log } from '../utils/logger'
 
 /** Google OAuth client ID from environment */
@@ -33,8 +35,28 @@ const ACCESS_TOKEN_KEY = 'yearbird:accessToken'
 const EXPIRES_AT_KEY = 'yearbird:expiresAt'
 const GRANTED_SCOPES_KEY = 'yearbird:grantedScopes'
 
-let tokenClient: google.accounts.oauth2.TokenClient | null = null
-let successHandler: ((response: google.accounts.oauth2.TokenResponse) => void) | null = null
+// Timing constants
+const POPUP_DETECTION_TIMEOUT_MS = 1000
+const VERIFIER_EXPIRY_MS = 5 * 60 * 1000 // 5 minutes
+
+/**
+ * PKCE verifier storage with request ID correlation.
+ * Using a Map prevents race conditions when multiple auth flows are initiated.
+ * Each entry has an expiry time to prevent memory leaks from abandoned flows.
+ */
+interface VerifierEntry {
+  verifier: string
+  state: string
+  expiresAt: number
+}
+const pendingVerifiers = new Map<string, VerifierEntry>()
+
+// Track the current pending auth flow's state (for correlating callback)
+let currentAuthState: string | null = null
+
+let codeClient: google.accounts.oauth2.CodeClient | null = null
+let successHandler: ((response: TokenResponse) => void) | null = null
+let errorHandler: ((error: string) => void) | null = null
 let signInPopup: Window | null = null
 let hasPatchedOpen = false
 let isAuthPopupPending = false
@@ -45,13 +67,61 @@ type SignInStatus = 'opened' | 'focused' | 'unavailable'
 const isGoogleReady = () => typeof google !== 'undefined' && Boolean(google.accounts?.oauth2)
 const POPUP_URL_HINT = 'accounts.google.com'
 
+// Re-export PKCE functions for backward compatibility
+export { generateCodeVerifier } from '../utils/pkce'
+export { generateCodeChallenge } from '../utils/pkce'
+
+/**
+ * Store a pending verifier with expiration.
+ * @internal
+ */
+function storePendingVerifier(state: string, verifier: string): void {
+  // Clean up expired entries
+  const now = Date.now()
+  for (const [key, entry] of pendingVerifiers.entries()) {
+    if (now >= entry.expiresAt) {
+      pendingVerifiers.delete(key)
+    }
+  }
+
+  pendingVerifiers.set(state, {
+    verifier,
+    state,
+    expiresAt: now + VERIFIER_EXPIRY_MS,
+  })
+}
+
+/**
+ * Retrieve and consume a pending verifier by state.
+ * @internal
+ */
+function consumePendingVerifier(state: string): string | null {
+  const entry = pendingVerifiers.get(state)
+  if (!entry) {
+    return null
+  }
+
+  pendingVerifiers.delete(state)
+
+  // Check if expired
+  if (Date.now() >= entry.expiresAt) {
+    return null
+  }
+
+  return entry.verifier
+}
+
+// ============================================================================
+// Popup Tracking
+// ============================================================================
+
 /**
  * Monkey-patches `window.open` to capture references to Google OAuth popups.
  *
  * ## Why This Exists
  *
  * Google Identity Services (GIS) creates OAuth consent popups internally via
- * `tokenClient.requestAccessToken()`. The GIS library does not expose any API
+ * `codeClient.requestCode()`. The GIS library does not expose any API
  * to obtain a reference to this popup window. Without that reference, we cannot:
  *
  * 1. **Detect if the popup is still open** - Users may click "Sign In" multiple
@@ -61,63 +131,7 @@ const POPUP_URL_HINT = 'accounts.google.com'
  * 3. **Track popup lifecycle** - Know when the popup closes (user completed or
  *    cancelled auth) to update UI state accordingly.
  *
- * ## What This Does
- *
- * This function intercepts all `window.open()` calls by replacing it with a
- * wrapper function. The wrapper:
- *
- * 1. Calls the original `window.open()` with all original arguments
- * 2. Checks if this call is likely a Google OAuth popup by either:
- *    - The `isAuthPopupPending` flag being set (we just called `requestAccessToken`)
- *    - The URL containing 'accounts.google.com'
- * 3. If it's an OAuth popup, stores the window reference in `signInPopup`
- * 4. Returns the popup reference (preserving original behavior)
- *
- * The patch is applied once and guarded by `hasPatchedOpen` to prevent
- * double-patching.
- *
- * ## Risks and Fragility
- *
- * **This is a fragile hack.** It works today but could break due to:
- *
- * - **GIS library changes**: If Google changes how/when they call `window.open`,
- *   our detection logic may miss the popup or capture the wrong window.
- * - **Browser security updates**: Future browser versions might restrict or
- *   change `window.open` behavior in ways that break our patch.
- * - **Third-party conflicts**: Other libraries that also patch `window.open`
- *   could interfere (order of patching matters).
- * - **URL pattern changes**: If Google changes their OAuth URLs to not include
- *   'accounts.google.com', the URL-based detection will fail.
- * - **Popup blockers**: Some popup blockers might wrap `window.open` themselves,
- *   potentially breaking the chain.
- *
- * ## Alternatives Considered
- *
- * 1. **GIS Callback-only approach**: Just use GIS callbacks without popup
- *    tracking. Downside: Poor UX when users spam the sign-in button (multiple
- *    popups spawn).
- *
- * 2. **Custom OAuth flow**: Implement our own OAuth popup/redirect flow instead
- *    of using GIS. Downside: More code, more security surface, lose GIS's
- *    built-in handling of edge cases.
- *
- * 3. **Redirect flow instead of popup**: Use `ux_mode: 'redirect'` in GIS.
- *    Downside: Worse UX (full page navigation), more complex state management
- *    across page loads.
- *
- * 4. **Debounce sign-in button**: Just disable the button for N seconds after
- *    click. Downside: Doesn't help if popup is hidden behind other windows;
- *    arbitrary timeout is bad UX.
- *
- * The monkey-patch approach was chosen as the least-bad option that provides
- * good UX with minimal code complexity. If it breaks in the future, falling
- * back to approach #1 (no popup tracking) is acceptable - users might see
- * duplicate popups occasionally, but auth will still work.
- *
  * @internal
- * @see signIn - Sets `isAuthPopupPending` before calling `requestAccessToken`
- * @see getOpenPopup - Checks if the captured popup is still open
- * @see hasOpenSignInPopup - Public API to check popup status
  */
 const ensureOpenPatched = () => {
   if (hasPatchedOpen || typeof window === 'undefined' || typeof window.open !== 'function') {
@@ -160,6 +174,7 @@ export function hasOpenSignInPopup() {
 export function clearSignInPopup() {
   signInPopup = null
   isAuthPopupPending = false
+  currentAuthState = null
   if (pendingPopupResetTimeout !== null) {
     window.clearTimeout(pendingPopupResetTimeout)
     pendingPopupResetTimeout = null
@@ -170,9 +185,42 @@ export function hasClientId() {
   return Boolean(CLIENT_ID)
 }
 
-export function initializeAuth(onSuccess: (response: google.accounts.oauth2.TokenResponse) => void) {
+// ============================================================================
+// Auth Initialization
+// ============================================================================
+
+/**
+ * Initialize the Google OAuth code client for authorization code flow with PKCE.
+ *
+ * ## PKCE Limitation with GIS
+ *
+ * Google Identity Services (GIS) `initCodeClient` does not support passing
+ * `code_challenge` and `code_challenge_method` parameters directly. For the
+ * popup flow with `postmessage` redirect, GIS handles the OAuth flow internally.
+ *
+ * While we generate and send a `code_verifier` during token exchange, Google's
+ * authorization server cannot verify it without the corresponding `code_challenge`.
+ * This means PKCE validation is not enforced by Google for the popup flow.
+ *
+ * However, the popup flow still has security protections:
+ * 1. **Origin verification**: GIS validates the requesting origin
+ * 2. **postmessage channel**: Auth code is sent via postMessage to the opener
+ * 3. **Short-lived codes**: Authorization codes expire quickly
+ *
+ * For the redirect flow (TV mode), PKCE is fully implemented and verified.
+ *
+ * @param onSuccess - Callback when token exchange succeeds
+ * @param onError - Callback when auth fails
+ * @returns true if initialization succeeded
+ */
+export function initializeAuth(
+  onSuccess: (response: TokenResponse) => void,
+  onError?: (error: string) => void,
+) {
   successHandler = onSuccess
-  if (tokenClient) {
+  errorHandler = onError ?? null
+
+  if (codeClient) {
     return true
   }
   if (!CLIENT_ID) {
@@ -183,27 +231,83 @@ export function initializeAuth(onSuccess: (response: google.accounts.oauth2.Toke
     return false
   }
 
-  tokenClient = google.accounts.oauth2.initTokenClient({
+  codeClient = google.accounts.oauth2.initCodeClient({
     client_id: CLIENT_ID,
-    scope: ALL_SCOPES, // Request calendar + drive.appdata upfront for Cloud Sync
-    callback: onSuccess,
+    scope: ALL_SCOPES,
+    ux_mode: 'popup',
+    redirect_uri: 'postmessage', // Required for popup mode
+    callback: async (response: google.accounts.oauth2.CodeResponse) => {
+      if (response.error) {
+        log.error('Auth error:', response.error)
+        currentAuthState = null
+        errorHandler?.(response.error)
+        return
+      }
+
+      // Validate state parameter for CSRF protection
+      const returnedState = response.state
+      if (currentAuthState && returnedState !== currentAuthState) {
+        log.error('Auth state mismatch - possible CSRF attack')
+        currentAuthState = null
+        errorHandler?.('state_mismatch')
+        return
+      }
+
+      // Get the verifier for this auth flow
+      const codeVerifier = returnedState ? consumePendingVerifier(returnedState) : null
+
+      if (!codeVerifier) {
+        log.error('No code verifier available for state:', returnedState)
+        currentAuthState = null
+        errorHandler?.('no_code_verifier')
+        return
+      }
+
+      try {
+        // Exchange code for token via Worker
+        const tokenResponse = await exchangeCodeForToken({
+          code: response.code,
+          codeVerifier,
+          redirectUri: 'postmessage',
+        })
+        currentAuthState = null
+        successHandler?.(tokenResponse)
+      } catch (error) {
+        log.error('Token exchange failed:', error)
+        currentAuthState = null
+        errorHandler?.('token_exchange_failed')
+      }
+    },
+    error_callback: (error: google.accounts.oauth2.CodeError) => {
+      log.error('Auth error callback:', error)
+      currentAuthState = null
+      errorHandler?.(error.type)
+    },
   })
+
   return true
 }
 
-export function signIn() {
-  if (!tokenClient && successHandler) {
-    initializeAuth(successHandler)
+// ============================================================================
+// Sign In / Sign Out
+// ============================================================================
+
+/**
+ * Initiate sign-in flow using authorization code with PKCE.
+ */
+export async function signIn(): Promise<SignInStatus> {
+  if (!codeClient && successHandler) {
+    initializeAuth(successHandler, errorHandler ?? undefined)
   }
-  if (!tokenClient) {
+  if (!codeClient) {
     log.warn('Google Identity Services not ready')
-    return 'unavailable' satisfies SignInStatus
+    return 'unavailable'
   }
 
   const existingPopup = getOpenPopup()
   if (existingPopup) {
     existingPopup.focus()
-    return 'focused' satisfies SignInStatus
+    return 'focused'
   }
 
   ensureOpenPatched()
@@ -215,21 +319,42 @@ export function signIn() {
     pendingPopupResetTimeout = window.setTimeout(() => {
       isAuthPopupPending = false
       pendingPopupResetTimeout = null
-    }, 1000)
+    }, POPUP_DETECTION_TIMEOUT_MS)
   }
-  tokenClient.requestAccessToken()
-  return 'opened' satisfies SignInStatus
+
+  // Generate PKCE code verifier and state
+  const codeVerifier = generateCodeVerifier()
+  const state = generateState()
+
+  // Store verifier correlated with state for later retrieval
+  storePendingVerifier(state, codeVerifier)
+  currentAuthState = state
+
+  // Request authorization code
+  // Note: GIS initCodeClient doesn't support code_challenge parameter directly.
+  // The code_verifier will be sent during token exchange, but Google cannot
+  // verify it without the challenge. See initializeAuth docs for details.
+  codeClient.requestCode({
+    hint: '', // Allow account selection
+    state, // CSRF protection
+  })
+
+  return 'opened'
 }
 
 export function signOut() {
   const token = sessionStorage.getItem(ACCESS_TOKEN_KEY)
   if (token && typeof google !== 'undefined' && google.accounts?.oauth2) {
     google.accounts.oauth2.revoke(token, () => {
-      console.info('Token revoked')
+      log.info('Token revoked')
     })
   }
   clearStoredAuth()
 }
+
+// ============================================================================
+// Token Storage
+// ============================================================================
 
 export function getStoredAuth(): { accessToken: string; expiresAt: number } | null {
   const accessToken = sessionStorage.getItem(ACCESS_TOKEN_KEY)
@@ -299,44 +424,74 @@ export function hasDriveScope(): boolean {
  * This will show a consent popup to the user.
  * Returns a promise that resolves to true if consent was granted.
  */
-export function requestDriveScope(): Promise<boolean> {
+export async function requestDriveScope(): Promise<boolean> {
+  if (!CLIENT_ID) {
+    log.warn('Missing VITE_GOOGLE_CLIENT_ID')
+    return false
+  }
+
+  if (!isGoogleReady()) {
+    log.warn('Google Identity Services not ready')
+    return false
+  }
+
   return new Promise((resolve) => {
-    if (!CLIENT_ID) {
-      log.warn('Missing VITE_GOOGLE_CLIENT_ID')
-      resolve(false)
-      return
-    }
+    const verifier = generateCodeVerifier()
+    const state = generateState()
 
-    if (!isGoogleReady()) {
-      log.warn('Google Identity Services not ready')
-      resolve(false)
-      return
-    }
+    // Store verifier for this request
+    storePendingVerifier(state, verifier)
 
-    // Create a new token client with both scopes
-    const client = google.accounts.oauth2.initTokenClient({
+    const client = google.accounts.oauth2.initCodeClient({
       client_id: CLIENT_ID,
       scope: ALL_SCOPES,
-      callback: (response) => {
+      ux_mode: 'popup',
+      redirect_uri: 'postmessage',
+      callback: async (response: google.accounts.oauth2.CodeResponse) => {
         if (response.error) {
           log.error('Drive scope request failed:', response.error)
           resolve(false)
           return
         }
 
-        // Store the new token with updated scopes
-        storeAuth(response.access_token, response.expires_in, response.scope)
-
-        // Notify the main auth handler if set
-        if (successHandler) {
-          successHandler(response)
+        // Validate state
+        if (response.state !== state) {
+          log.error('Drive scope request state mismatch')
+          resolve(false)
+          return
         }
 
-        // Check if Drive scope was actually granted
-        const granted = response.scope.includes(DRIVE_APPDATA_SCOPE)
-        resolve(granted)
+        const codeVerifier = consumePendingVerifier(state)
+        if (!codeVerifier) {
+          log.error('No verifier for drive scope request')
+          resolve(false)
+          return
+        }
+
+        try {
+          const tokenResponse = await exchangeCodeForToken({
+            code: response.code,
+            codeVerifier,
+            redirectUri: 'postmessage',
+          })
+
+          // Store the new token with updated scopes
+          storeAuth(tokenResponse.access_token, tokenResponse.expires_in, tokenResponse.scope)
+
+          // Notify the main auth handler if set
+          if (successHandler) {
+            successHandler(tokenResponse)
+          }
+
+          // Check if Drive scope was actually granted
+          const granted = tokenResponse.scope.includes(DRIVE_APPDATA_SCOPE)
+          resolve(granted)
+        } catch (error) {
+          log.error('Token exchange failed during Drive scope request:', error)
+          resolve(false)
+        }
       },
-      error_callback: (error) => {
+      error_callback: (error: google.accounts.oauth2.CodeError) => {
         log.error('Drive scope request error:', error)
         resolve(false)
       },
@@ -344,7 +499,7 @@ export function requestDriveScope(): Promise<boolean> {
 
     // Request with consent prompt to ensure the user sees the new scope
     ensureOpenPatched()
-    client.requestAccessToken({ prompt: 'consent' })
+    client.requestCode({ prompt: 'consent', state })
   })
 }
 

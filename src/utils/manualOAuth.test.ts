@@ -2,7 +2,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   buildOAuthRedirectUrl,
   clearHashFromUrl,
+  clearQueryFromUrl,
+  consumeCodeVerifier,
+  extractCodeFromUrl,
   extractErrorFromHash,
+  extractErrorFromUrl,
   extractTokenFromHash,
   hasOAuthResponse,
 } from './manualOAuth'
@@ -33,8 +37,8 @@ describe('manualOAuth', () => {
   })
 
   describe('buildOAuthRedirectUrl', () => {
-    it('builds correct OAuth URL with all parameters including state', () => {
-      const url = buildOAuthRedirectUrl(
+    it('builds correct OAuth URL with all parameters including PKCE', async () => {
+      const url = await buildOAuthRedirectUrl(
         'test-client-id',
         'https://example.com/callback',
         'https://www.googleapis.com/auth/calendar.readonly',
@@ -45,16 +49,19 @@ describe('manualOAuth', () => {
       expect(parsed.pathname).toBe('/o/oauth2/v2/auth')
       expect(parsed.searchParams.get('client_id')).toBe('test-client-id')
       expect(parsed.searchParams.get('redirect_uri')).toBe('https://example.com/callback')
-      expect(parsed.searchParams.get('response_type')).toBe('token')
+      expect(parsed.searchParams.get('response_type')).toBe('code') // Auth code flow
       expect(parsed.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.readonly')
       expect(parsed.searchParams.get('include_granted_scopes')).toBe('true')
       expect(parsed.searchParams.get('prompt')).toBe('select_account')
       // State parameter should be present for CSRF protection
       expect(parsed.searchParams.get('state')).toBeTruthy()
+      // PKCE parameters
+      expect(parsed.searchParams.get('code_challenge')).toBeTruthy()
+      expect(parsed.searchParams.get('code_challenge_method')).toBe('S256')
     })
 
-    it('stores state parameter in sessionStorage', () => {
-      const url = buildOAuthRedirectUrl(
+    it('stores state parameter and code verifier in sessionStorage', async () => {
+      const url = await buildOAuthRedirectUrl(
         'test-client-id',
         'https://example.com/callback',
         'scope',
@@ -63,19 +70,24 @@ describe('manualOAuth', () => {
       const parsed = new URL(url)
       const state = parsed.searchParams.get('state')
       expect(mockSessionStorage['yearbird:oauthState']).toBe(state)
+      expect(mockSessionStorage['yearbird:codeVerifier']).toBeTruthy()
     })
 
-    it('generates unique state for each call', () => {
-      const url1 = buildOAuthRedirectUrl('id', 'uri', 'scope')
-      const url2 = buildOAuthRedirectUrl('id', 'uri', 'scope')
-
+    it('generates unique state and code verifier for each call', async () => {
+      const url1 = await buildOAuthRedirectUrl('id', 'uri', 'scope')
+      const verifier1 = mockSessionStorage['yearbird:codeVerifier']
       const state1 = new URL(url1).searchParams.get('state')
+
+      const url2 = await buildOAuthRedirectUrl('id', 'uri', 'scope')
+      const verifier2 = mockSessionStorage['yearbird:codeVerifier']
       const state2 = new URL(url2).searchParams.get('state')
+
       expect(state1).not.toBe(state2)
+      expect(verifier1).not.toBe(verifier2)
     })
 
-    it('encodes special characters in parameters', () => {
-      const url = buildOAuthRedirectUrl(
+    it('encodes special characters in parameters', async () => {
+      const url = await buildOAuthRedirectUrl(
         'client&id=test',
         'https://example.com/call back',
         'scope with spaces',
@@ -88,7 +100,178 @@ describe('manualOAuth', () => {
     })
   })
 
-  describe('extractTokenFromHash', () => {
+  describe('extractCodeFromUrl', () => {
+    const originalWindow = globalThis.window
+
+    beforeEach(() => {
+      globalThis.window = {
+        location: {
+          hash: '',
+          pathname: '/',
+          search: '',
+        },
+        history: {
+          replaceState: vi.fn(),
+        },
+      } as unknown as Window & typeof globalThis
+    })
+
+    afterEach(() => {
+      globalThis.window = originalWindow
+    })
+
+    it('returns null when query is empty', () => {
+      window.location.search = ''
+      expect(extractCodeFromUrl()).toBeNull()
+    })
+
+    it('returns null when query has no code', () => {
+      window.location.search = '?state=abc123'
+      expect(extractCodeFromUrl()).toBeNull()
+    })
+
+    it('extracts code from valid query params', () => {
+      mockSessionStorage['yearbird:oauthState'] = 'test-state-123'
+      window.location.search = '?code=test-auth-code&state=test-state-123'
+      const result = extractCodeFromUrl()
+      expect(result).toEqual({
+        code: 'test-auth-code',
+        state: 'test-state-123',
+      })
+    })
+
+    it('accepts code when state matches stored state', () => {
+      mockSessionStorage['yearbird:oauthState'] = 'test-state-123'
+      window.location.search = '?code=test-code&state=test-state-123'
+      const result = extractCodeFromUrl()
+      expect(result).toEqual({
+        code: 'test-code',
+        state: 'test-state-123',
+      })
+      // State should be consumed (removed from storage)
+      expect(mockSessionStorage['yearbird:oauthState']).toBeUndefined()
+    })
+
+    it('rejects code when state does not match', () => {
+      mockSessionStorage['yearbird:oauthState'] = 'expected-state'
+      window.location.search = '?code=test-code&state=wrong-state'
+      const result = extractCodeFromUrl()
+      expect(result).toBeNull()
+    })
+
+    it('returns null when window is undefined', () => {
+      globalThis.window = undefined as unknown as Window & typeof globalThis
+      expect(extractCodeFromUrl()).toBeNull()
+    })
+  })
+
+  describe('consumeCodeVerifier', () => {
+    it('returns and removes code verifier from storage', () => {
+      mockSessionStorage['yearbird:codeVerifier'] = 'test-verifier'
+      const verifier = consumeCodeVerifier()
+      expect(verifier).toBe('test-verifier')
+      expect(mockSessionStorage['yearbird:codeVerifier']).toBeUndefined()
+    })
+
+    it('returns null when no verifier stored', () => {
+      const verifier = consumeCodeVerifier()
+      expect(verifier).toBeNull()
+    })
+  })
+
+  describe('extractErrorFromUrl', () => {
+    const originalWindow = globalThis.window
+
+    beforeEach(() => {
+      globalThis.window = {
+        location: {
+          hash: '',
+          pathname: '/',
+          search: '',
+        },
+        history: {
+          replaceState: vi.fn(),
+        },
+      } as unknown as Window & typeof globalThis
+    })
+
+    afterEach(() => {
+      globalThis.window = originalWindow
+    })
+
+    it('returns null when query is empty', () => {
+      window.location.search = ''
+      expect(extractErrorFromUrl()).toBeNull()
+    })
+
+    it('returns null when no error in query', () => {
+      window.location.search = '?code=test&state=abc'
+      expect(extractErrorFromUrl()).toBeNull()
+    })
+
+    it('extracts error without description', () => {
+      window.location.search = '?error=access_denied'
+      const result = extractErrorFromUrl()
+      expect(result).toEqual({
+        error: 'access_denied',
+        errorDescription: undefined,
+      })
+    })
+
+    it('extracts error with description', () => {
+      window.location.search = '?error=access_denied&error_description=User%20denied%20access'
+      const result = extractErrorFromUrl()
+      expect(result).toEqual({
+        error: 'access_denied',
+        errorDescription: 'User denied access',
+      })
+    })
+
+    it('returns null when window is undefined', () => {
+      globalThis.window = undefined as unknown as Window & typeof globalThis
+      expect(extractErrorFromUrl()).toBeNull()
+    })
+  })
+
+  describe('clearQueryFromUrl', () => {
+    const originalWindow = globalThis.window
+
+    beforeEach(() => {
+      globalThis.window = {
+        location: {
+          hash: '#section',
+          pathname: '/app',
+          search: '?code=test&state=abc',
+        },
+        history: {
+          replaceState: vi.fn(),
+        },
+      } as unknown as Window & typeof globalThis
+    })
+
+    afterEach(() => {
+      globalThis.window = originalWindow
+    })
+
+    it('calls replaceState with path and hash (no query)', () => {
+      clearQueryFromUrl()
+      expect(window.history.replaceState).toHaveBeenCalledWith({}, '', '/app#section')
+    })
+
+    it('handles empty hash', () => {
+      window.location.hash = ''
+      clearQueryFromUrl()
+      expect(window.history.replaceState).toHaveBeenCalledWith({}, '', '/app')
+    })
+
+    it('does not throw when window is undefined', () => {
+      globalThis.window = undefined as unknown as Window & typeof globalThis
+      expect(() => clearQueryFromUrl()).not.toThrow()
+    })
+  })
+
+  // Legacy implicit flow tests (kept for backwards compatibility)
+  describe('extractTokenFromHash (legacy)', () => {
     const originalWindow = globalThis.window
 
     beforeEach(() => {
@@ -213,7 +396,7 @@ describe('manualOAuth', () => {
     })
   })
 
-  describe('extractErrorFromHash', () => {
+  describe('extractErrorFromHash (legacy)', () => {
     const originalWindow = globalThis.window
 
     beforeEach(() => {
@@ -267,7 +450,7 @@ describe('manualOAuth', () => {
     })
   })
 
-  describe('clearHashFromUrl', () => {
+  describe('clearHashFromUrl (legacy)', () => {
     const originalWindow = globalThis.window
 
     beforeEach(() => {
@@ -321,23 +504,24 @@ describe('manualOAuth', () => {
       globalThis.window = originalWindow
     })
 
-    it('returns false when hash is empty', () => {
+    it('returns false when query and hash are empty', () => {
+      window.location.search = ''
       window.location.hash = ''
       expect(hasOAuthResponse()).toBe(false)
     })
 
-    it('returns true when hash has access_token', () => {
-      window.location.hash = '#access_token=test'
+    it('returns true when query has code', () => {
+      window.location.search = '?code=test'
       expect(hasOAuthResponse()).toBe(true)
     })
 
-    it('returns true when hash has error', () => {
-      window.location.hash = '#error=access_denied'
+    it('returns true when query has error', () => {
+      window.location.search = '?error=access_denied'
       expect(hasOAuthResponse()).toBe(true)
     })
 
-    it('returns false for non-OAuth hash', () => {
-      window.location.hash = '#section-1'
+    it('returns false for non-OAuth query', () => {
+      window.location.search = '?foo=bar'
       expect(hasOAuthResponse()).toBe(false)
     })
 

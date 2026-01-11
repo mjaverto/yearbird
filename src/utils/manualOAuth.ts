@@ -1,29 +1,29 @@
 /**
  * Manual OAuth Utility for TV Mode
  *
- * Implements Google OAuth 2.0 implicit flow for environments where
- * Google Identity Services (GIS) library cannot load (e.g., TV browsers).
+ * Implements Google OAuth 2.0 authorization code flow with PKCE for environments
+ * where Google Identity Services (GIS) library cannot load (e.g., TV browsers).
  *
  * This uses redirect-based OAuth instead of popup-based GIS flow.
  *
- * SECURITY NOTE: The implicit flow returns tokens in URL fragments, which
- * are less secure than authorization code flow. Tokens may briefly appear
- * in browser history before being cleared. This is an acceptable tradeoff
- * for TV browsers where GIS cannot load, but authorization code flow with
- * PKCE would be preferable if server-side token exchange were available.
+ * SECURITY: Uses authorization code flow with PKCE instead of the deprecated
+ * implicit flow. Tokens are exchanged server-side via our Cloudflare Worker,
+ * keeping the client_secret secure and avoiding tokens in URL fragments.
  *
- * @see https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow
+ * @see https://developers.google.com/identity/protocols/oauth2/web-server
+ * @see https://oauth.net/2/pkce/
  */
 
 import { log } from './logger'
+import { generateCodeChallenge, generateCodeVerifier, generateState } from './pkce'
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const OAUTH_STATE_KEY = 'yearbird:oauthState'
+const CODE_VERIFIER_KEY = 'yearbird:codeVerifier'
 
-export interface TokenData {
-  accessToken: string
-  expiresIn: number
-  scope?: string
+export interface AuthCodeData {
+  code: string
+  state: string
 }
 
 export interface OAuthError {
@@ -31,17 +31,9 @@ export interface OAuthError {
   errorDescription?: string
 }
 
-/**
- * Generates a cryptographically random state parameter for CSRF protection.
- * Falls back to Math.random if crypto API unavailable.
- */
-function generateState(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID()
-  }
-  // Fallback for older browsers
-  return Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
+// ============================================================================
+// State Management
+// ============================================================================
 
 /**
  * Stores the OAuth state parameter in sessionStorage for validation on callback.
@@ -70,30 +62,68 @@ function consumeOAuthState(): string | null {
 }
 
 /**
- * Builds the Google OAuth authorization URL for implicit flow.
+ * Stores the PKCE code verifier in sessionStorage (survives redirect).
+ */
+function storeCodeVerifier(verifier: string): void {
+  try {
+    sessionStorage.setItem(CODE_VERIFIER_KEY, verifier)
+  } catch (error) {
+    log.debug('Storage access error storing code verifier:', error)
+  }
+}
+
+/**
+ * Retrieves and clears the stored PKCE code verifier.
+ * Returns null if not found or storage unavailable.
+ */
+export function consumeCodeVerifier(): string | null {
+  try {
+    const verifier = sessionStorage.getItem(CODE_VERIFIER_KEY)
+    sessionStorage.removeItem(CODE_VERIFIER_KEY)
+    return verifier
+  } catch (error) {
+    log.debug('Storage access error consuming code verifier:', error)
+    return null
+  }
+}
+
+// ============================================================================
+// OAuth URL Building
+// ============================================================================
+
+/**
+ * Builds the Google OAuth authorization URL for authorization code flow with PKCE.
  *
- * Generates and stores a random state parameter for CSRF protection.
- * The state must be validated when extracting the token on callback.
+ * Generates and stores:
+ * - Random state parameter for CSRF protection
+ * - PKCE code verifier (stored in sessionStorage to survive redirect)
  *
  * @param clientId - Google OAuth client ID
  * @param redirectUri - URI to redirect back to after authorization
  * @param scope - OAuth scope(s) to request
  * @returns The full authorization URL to redirect the user to
  */
-export function buildOAuthRedirectUrl(
+export async function buildOAuthRedirectUrl(
   clientId: string,
   redirectUri: string,
   scope: string,
-): string {
+): Promise<string> {
   const state = generateState()
   storeOAuthState(state)
+
+  // PKCE: Generate and store verifier before redirect
+  const codeVerifier = generateCodeVerifier()
+  storeCodeVerifier(codeVerifier)
+  const codeChallenge = await generateCodeChallenge(codeVerifier)
 
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    response_type: 'token', // Implicit flow - returns token in URL hash
+    response_type: 'code', // Authorization code flow (not implicit)
     scope,
     state, // CSRF protection - must be validated on callback
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
     include_granted_scopes: 'true',
     // Prompt user to select account (useful if they have multiple Google accounts)
     prompt: 'select_account',
@@ -102,15 +132,127 @@ export function buildOAuthRedirectUrl(
 }
 
 /**
- * Extracts the OAuth token from the URL hash fragment.
+ * Extracts the authorization code from the URL query parameters.
  *
- * After a successful OAuth redirect, Google returns the access token
- * in the URL hash like: #access_token=xxx&expires_in=3600&token_type=Bearer&state=xxx
+ * After a successful OAuth redirect, Google returns the authorization code
+ * in the URL query string like: ?code=xxx&state=xxx
  *
  * Validates the state parameter against the stored value to prevent CSRF attacks.
  * Returns null if state validation fails.
  *
- * @returns Token data if present and valid, null otherwise
+ * @returns Auth code data if present and valid, null otherwise
+ */
+export function extractCodeFromUrl(): AuthCodeData | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const code = params.get('code')
+  const returnedState = params.get('state')
+
+  if (!code) {
+    return null
+  }
+
+  // Validate state parameter to prevent CSRF attacks
+  const storedState = consumeOAuthState()
+  if (returnedState && storedState && returnedState !== storedState) {
+    // State mismatch - possible CSRF attack, reject the code
+    log.warn('OAuth state mismatch - possible CSRF attack')
+    return null
+  }
+
+  return { code, state: returnedState ?? '' }
+}
+
+/**
+ * Extracts OAuth error information from the URL query parameters.
+ *
+ * If the user denies access or an error occurs, Google returns
+ * error information in the query string like: ?error=access_denied&error_description=...
+ *
+ * @returns Error data if present, null otherwise
+ */
+export function extractErrorFromUrl(): OAuthError | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const error = params.get('error')
+
+  if (!error) {
+    return null
+  }
+
+  return {
+    error,
+    errorDescription: params.get('error_description') ?? undefined,
+  }
+}
+
+/**
+ * Clears the URL query parameters without triggering a page reload.
+ *
+ * This should be called after extracting the code to clean up
+ * the URL and prevent the code from being visible in the browser history.
+ */
+export function clearQueryFromUrl(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  // Use replaceState to avoid adding to browser history
+  window.history.replaceState(
+    {},
+    '',
+    window.location.pathname + window.location.hash,
+  )
+}
+
+/**
+ * Checks if the current URL contains OAuth response data.
+ *
+ * @returns true if URL contains code or error parameters
+ */
+export function hasOAuthResponse(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  return params.has('code') || params.has('error')
+}
+
+// ============================================================================
+// Legacy Implicit Flow Support
+// ============================================================================
+//
+// DEPRECATION NOTICE: These functions support the OAuth 2.0 implicit flow
+// which is deprecated in favor of the authorization code flow with PKCE.
+//
+// Timeline:
+// - v1.0: Implicit flow deprecated, authorization code flow is default
+// - v2.0: These functions will be removed entirely
+//
+// Migration: Use extractCodeFromUrl() + token exchange via Worker instead.
+// ============================================================================
+
+export interface TokenData {
+  accessToken: string
+  expiresIn: number
+  scope?: string
+}
+
+// Track if we've warned about deprecated usage (only warn once per session)
+let hasWarnedImplicitFlow = false
+
+/**
+ * @deprecated Use extractCodeFromUrl() instead. Implicit flow is deprecated.
+ * Will be removed in v2.0.
+ *
+ * Extracts the OAuth token from the URL hash fragment.
  */
 export function extractTokenFromHash(): TokenData | null {
   if (typeof window === 'undefined') {
@@ -120,6 +262,16 @@ export function extractTokenFromHash(): TokenData | null {
   const hash = window.location.hash.slice(1) // Remove leading #
   if (!hash) {
     return null
+  }
+
+  // Warn once per session when implicit flow is actually used
+  if (!hasWarnedImplicitFlow && hash.includes('access_token')) {
+    log.warn(
+      '[DEPRECATED] OAuth implicit flow detected. ' +
+        'This flow will be removed in v2.0. ' +
+        'Please migrate to authorization code flow with PKCE.'
+    )
+    hasWarnedImplicitFlow = true
   }
 
   const params = new URLSearchParams(hash)
@@ -135,7 +287,6 @@ export function extractTokenFromHash(): TokenData | null {
   // Validate state parameter to prevent CSRF attacks
   const storedState = consumeOAuthState()
   if (returnedState && storedState && returnedState !== storedState) {
-    // State mismatch - possible CSRF attack, reject the token
     log.warn('OAuth state mismatch - possible CSRF attack')
     return null
   }
@@ -149,12 +300,10 @@ export function extractTokenFromHash(): TokenData | null {
 }
 
 /**
+ * @deprecated Use extractErrorFromUrl() instead. Implicit flow is deprecated.
+ * Will be removed in v2.0.
+ *
  * Extracts OAuth error information from the URL hash fragment.
- *
- * If the user denies access or an error occurs, Google returns
- * error information in the hash like: #error=access_denied&error_description=...
- *
- * @returns Error data if present, null otherwise
  */
 export function extractErrorFromHash(): OAuthError | null {
   if (typeof window === 'undefined') {
@@ -180,10 +329,10 @@ export function extractErrorFromHash(): OAuthError | null {
 }
 
 /**
- * Clears the URL hash fragment without triggering a page reload.
+ * @deprecated Use clearQueryFromUrl() instead. Implicit flow is deprecated.
+ * Will be removed in v2.0.
  *
- * This should be called after extracting the token to clean up
- * the URL and prevent the token from being visible in the browser history.
+ * Clears the URL hash fragment without triggering a page reload.
  */
 export function clearHashFromUrl(): void {
   if (typeof window === 'undefined') {
@@ -196,23 +345,4 @@ export function clearHashFromUrl(): void {
     '',
     window.location.pathname + window.location.search,
   )
-}
-
-/**
- * Checks if the current URL hash contains OAuth response data.
- *
- * @returns true if hash contains access_token or error parameters
- */
-export function hasOAuthResponse(): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  const hash = window.location.hash.slice(1)
-  if (!hash) {
-    return false
-  }
-
-  const params = new URLSearchParams(hash)
-  return params.has('access_token') || params.has('error')
 }

@@ -872,16 +872,16 @@ export function LandingPage({
           </div>
         </section>
 
-        {/* Hero image - edge-to-edge showcase with animated demo */}
-        <section className="w-full px-2 pb-28 sm:px-3">
-          <div className="reveal relative" style={{ animationDelay: '160ms' }}>
+        {/* Hero image - animated demo with comfortable padding */}
+        <section className="w-full px-4 pb-28 sm:px-6 lg:px-10">
+          <div className="reveal relative mx-auto max-w-6xl" style={{ animationDelay: '160ms' }}>
             <div className="absolute -inset-4 rounded-[32px] bg-white/50 blur-3xl sm:-inset-8 sm:rounded-[48px]" aria-hidden="true" />
             <div className="relative overflow-hidden rounded-xl border border-white/70 bg-white/90 shadow-[0_50px_100px_-40px_rgba(15,23,42,0.4)] backdrop-blur sm:rounded-2xl lg:rounded-3xl">
               <img
                 src={heroGif}
                 alt="Animated demo showing Yearbird's day-click interaction: clicking a day reveals the event schedule, then clicking an event shows rich details like location and description"
-                width={960}
-                height={540}
+                width={1280}
+                height={720}
                 loading="eager"
                 decoding="async"
                 className="w-full"

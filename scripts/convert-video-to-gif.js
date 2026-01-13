@@ -63,19 +63,19 @@ async function main() {
   // - scale=960:-1: Scale to 960px width, maintain aspect ratio
   // - palettegen/paletteuse: Better color quality for GIFs
   try {
-    // Pass 1: Generate color palette
+    // Pass 1: Generate color palette (full resolution for crisp output)
     console.log('Pass 1: Generating color palette...')
     execFileSync('ffmpeg', [
       '-y',
       '-i',
       videoPath,
       '-vf',
-      'fps=12,scale=960:-1:flags=lanczos,palettegen=stats_mode=diff',
+      'fps=15,scale=1280:-1:flags=lanczos,palettegen=stats_mode=diff:max_colors=256',
       '-y',
       '/tmp/palette.png',
     ], { stdio: 'inherit' })
 
-    // Pass 2: Create GIF with optimized palette
+    // Pass 2: Create GIF with optimized palette (full 1280px width)
     console.log('Pass 2: Creating GIF with optimized palette...')
     execFileSync('ffmpeg', [
       '-y',
@@ -84,7 +84,7 @@ async function main() {
       '-i',
       '/tmp/palette.png',
       '-lavfi',
-      'fps=12,scale=960:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
+      'fps=15,scale=1280:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=floyd_steinberg:diff_mode=rectangle',
       '-y',
       outputPath,
     ], { stdio: 'inherit' })

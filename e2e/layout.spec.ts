@@ -104,6 +104,40 @@ test.describe('marketing snapshots (1280)', () => {
       animations: 'disabled',
     })
   })
+
+  test('day detail popover', async ({ page }) => {
+    // Click on January 13, 2026 which has rich event data
+    const dayCell = page.locator('[data-date="2026-01-13"]').first()
+    await dayCell.click()
+    // Wait for popover to appear with events
+    await expect(page.getByText("Sarah Chen's birthday")).toBeVisible()
+    await page.waitForTimeout(100)
+
+    await expect(page.locator('#root')).toHaveScreenshot('marketing-day-detail-1280.png', {
+      animations: 'disabled',
+    })
+  })
+
+  test('day detail with event tooltip', async ({ page }) => {
+    // Click on January 13, 2026 which has rich event data
+    const dayCell = page.locator('[data-date="2026-01-13"]').first()
+    await dayCell.click()
+    // Wait for popover to appear
+    await expect(page.getByText("Sarah Chen's birthday")).toBeVisible()
+    await page.waitForTimeout(100)
+
+    // Click on a timed event in the schedule to show tooltip
+    const designReview = page.getByRole('button', { name: 'Design review session' })
+    await designReview.click()
+    // Wait for tooltip to appear
+    await expect(
+      page.getByRole('tooltip', { name: 'Design review session details' })
+    ).toBeVisible()
+
+    await expect(page.locator('#root')).toHaveScreenshot('marketing-day-detail-tooltip-1280.png', {
+      animations: 'disabled',
+    })
+  })
 })
 
 // Open Graph / Social sharing images (1200x630 - standard OG ratio 1.91:1)
@@ -173,6 +207,40 @@ test.describe('marketing snapshots (1920)', () => {
     await page.waitForTimeout(100)
 
     await expect(page.locator('#root')).toHaveScreenshot('marketing-week-view-1920.png', {
+      animations: 'disabled',
+    })
+  })
+
+  test('day detail popover', async ({ page }) => {
+    // Click on January 13, 2026 which has rich event data
+    const dayCell = page.locator('[data-date="2026-01-13"]').first()
+    await dayCell.click()
+    // Wait for popover to appear with events
+    await expect(page.getByText("Sarah Chen's birthday")).toBeVisible()
+    await page.waitForTimeout(100)
+
+    await expect(page.locator('#root')).toHaveScreenshot('marketing-day-detail-1920.png', {
+      animations: 'disabled',
+    })
+  })
+
+  test('day detail with event tooltip', async ({ page }) => {
+    // Click on January 13, 2026 which has rich event data
+    const dayCell = page.locator('[data-date="2026-01-13"]').first()
+    await dayCell.click()
+    // Wait for popover to appear
+    await expect(page.getByText("Sarah Chen's birthday")).toBeVisible()
+    await page.waitForTimeout(100)
+
+    // Click on a timed event in the schedule to show tooltip
+    const designReview = page.getByRole('button', { name: 'Design review session' })
+    await designReview.click()
+    // Wait for tooltip to appear
+    await expect(
+      page.getByRole('tooltip', { name: 'Design review session details' })
+    ).toBeVisible()
+
+    await expect(page.locator('#root')).toHaveScreenshot('marketing-day-detail-tooltip-1920.png', {
       animations: 'disabled',
     })
   })

@@ -19,7 +19,6 @@ import {
   migrateV1ToV2,
 } from './syncManager'
 import type { CloudConfigV1, CloudConfigV2, CloudSyncSettings } from '../types/cloudConfig'
-import { DEFAULT_CATEGORIES } from '../config/categories'
 
 // Mock auth module
 vi.mock('./auth', () => ({

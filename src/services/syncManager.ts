@@ -1,11 +1,11 @@
 /**
  * Sync Manager - Orchestrates synchronization between in-memory state and Google Drive.
  *
- * Sync Strategy: "Drive as primary, in-memory as working state"
- * - On app load: Fetch from Drive, populate in-memory state
- * - On user action: Update in-memory state, write to Drive async
- * - Offline: In-memory state only, queue Drive writes for later
- * - Drive unavailable: Graceful degradation, user notified
+ * SIMPLIFIED Sync Strategy: "Cloud is source of truth"
+ * - On app load: Read from cloud → apply to local (no merge)
+ * - On user change: Write local to cloud (debounced, no read/merge)
+ * - Offline load: Use local defaults
+ * - Offline change: Flag for later, write when back online
  */
 
 import type {
@@ -55,10 +55,11 @@ let syncDebounceTimer: number | null = null
 let isSyncing = false
 let isWriting = false
 let needsAnotherWrite = false
+let hasPendingChanges = false
 let lastSyncError: string | null = null
 
 /**
- * Generate a unique device ID for conflict resolution
+ * Generate a unique device ID for debugging/logging
  */
 function generateDeviceId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -125,8 +126,6 @@ export function isExplicitlyDisabled(): boolean {
  * unless they have explicitly disabled it.
  */
 export function isSyncEnabled(): boolean {
-  // Sync is enabled by default when user has drive scope
-  // Only disabled if user explicitly turned it off
   return hasDriveScope() && !isExplicitlyDisabled()
 }
 
@@ -134,12 +133,10 @@ export function isSyncEnabled(): boolean {
  * Get current sync status
  */
 export function getSyncStatus(): SyncStatus {
-  // Check if user explicitly disabled sync
   if (isExplicitlyDisabled()) {
     return 'disabled'
   }
 
-  // Check if we have drive scope (needed for sync)
   if (!hasDriveScope()) {
     return 'needs-consent'
   }
@@ -174,42 +171,12 @@ export function clearSyncError(): void {
 }
 
 /**
- * Check if a CloudConfig represents an "empty" state (no user settings).
- * Used to determine if we should prefer remote config over local defaults.
- */
-export function isEmptyConfig(config: CloudConfig): boolean {
-  if (config.version === 2) {
-    // v2: Check if only default categories exist (no customization)
-    const hasOnlyDefaults = config.categories.every((cat) => cat.isDefault === true)
-    const hasAllDefaults = DEFAULT_CATEGORIES.every((def) =>
-      config.categories.some((cat) => cat.id === def.id)
-    )
-    return (
-      config.filters.length === 0 &&
-      config.disabledCalendars.length === 0 &&
-      hasOnlyDefaults &&
-      hasAllDefaults &&
-      config.categories.length === DEFAULT_CATEGORIES.length
-    )
-  } else {
-    // v1: Legacy check
-    return (
-      config.filters.length === 0 &&
-      config.disabledCalendars.length === 0 &&
-      config.disabledBuiltInCategories.length === 0 &&
-      config.customCategories.length === 0
-    )
-  }
-}
-
-/**
  * Build a CloudConfig v2 from current in-memory state
  */
 export function buildCloudConfigFromLocal(): CloudConfigV2 {
   const settings = getSyncSettings()
   const categories = getCategories()
 
-  // Convert Category[] to CloudCategory[]
   const cloudCategories: CloudCategory[] = categories.map((cat) => ({
     id: cat.id,
     label: cat.label,
@@ -243,12 +210,9 @@ export function buildCloudConfigFromLocal(): CloudConfigV2 {
 export function migrateV1ToV2(config: CloudConfigV1): CloudConfigV2 {
   const now = Date.now()
 
-  // Build unified categories from defaults (minus disabled) + custom
   const disabledSet = new Set(config.disabledBuiltInCategories)
-
   const categories: CloudCategory[] = []
 
-  // Add non-disabled default categories
   for (const def of DEFAULT_CATEGORIES) {
     if (!disabledSet.has(def.id)) {
       categories.push({
@@ -264,7 +228,6 @@ export function migrateV1ToV2(config: CloudConfigV1): CloudConfigV2 {
     }
   }
 
-  // Add custom categories
   for (const custom of config.customCategories) {
     categories.push({
       id: custom.id,
@@ -278,10 +241,7 @@ export function migrateV1ToV2(config: CloudConfigV1): CloudConfigV2 {
     })
   }
 
-  // Migrate showTimedEvents boolean to timedEventMinHours:
-  // - true (show all) -> 0 hours
-  // - false (hide all) -> 3 hours (default threshold)
-  // - undefined -> undefined (use default)
+  // Migrate showTimedEvents boolean to timedEventMinHours
   const timedEventMinHours =
     config.showTimedEvents === true ? 0 : config.showTimedEvents === false ? 3 : undefined
 
@@ -311,119 +271,15 @@ function ensureV2(config: CloudConfig): CloudConfigV2 {
 }
 
 /**
- * Merge local and remote configs.
- *
- * Strategy: Last-write-wins based on updatedAt timestamp.
- * - Arrays (filters, disabledCalendars) use whole-array last-write-wins
- *   to properly handle deletions (union would resurrect deleted items)
- * - Categories merge by ID with per-item updatedAt for granular conflict resolution
- *
- * IMPORTANT: Category Deletion Behavior
- * Categories use per-item merge without tombstone tracking. This means:
- * - If you delete a category locally, it's removed from local storage
- * - But if remote still has it (from another device), it will be re-added on next sync
- * - To permanently delete across devices, all devices must delete the same category
- * - This is a trade-off: simpler implementation, but deletions don't propagate
- * - Future enhancement: add tombstone tracking with deletedAt timestamps
- *
- * Both configs are migrated to v2 before merging if needed.
- */
-export function mergeConfigs(
-  local: CloudConfig,
-  remote: CloudConfig
-): CloudConfigV2 {
-  const settings = getSyncSettings()
-
-  // Ensure both are v2 format
-  const localV2 = ensureV2(local)
-  const remoteV2 = ensureV2(remote)
-
-  const remoteIsNewer = remoteV2.updatedAt >= localV2.updatedAt
-
-  // Filters - last-write-wins (whole array)
-  const filters = remoteIsNewer ? remoteV2.filters : localV2.filters
-
-  // Disabled calendars - last-write-wins (whole array)
-  const disabledCalendars = remoteIsNewer
-    ? remoteV2.disabledCalendars
-    : localV2.disabledCalendars
-
-  // Categories - merge by ID with per-item updatedAt
-  // This allows granular updates while still supporting deletions
-  const categoryMap = new Map<string, CloudCategory>()
-
-  // Start with remote categories
-  for (const cat of remoteV2.categories) {
-    categoryMap.set(cat.id, cat)
-  }
-
-  // Merge local categories (newer wins per category)
-  for (const cat of localV2.categories) {
-    const existing = categoryMap.get(cat.id)
-    if (!existing || cat.updatedAt > existing.updatedAt) {
-      categoryMap.set(cat.id, cat)
-    }
-  }
-
-  // Display settings - last-write-wins
-  // Handle migration: prefer timedEventMinHours, fall back to showTimedEvents conversion
-  const getMinHours = (config: CloudConfigV2): number | undefined => {
-    if (config.timedEventMinHours !== undefined) {
-      return config.timedEventMinHours
-    }
-    // Migrate from legacy showTimedEvents if present
-    if (config.showTimedEvents !== undefined) {
-      return config.showTimedEvents ? 0 : 3
-    }
-    return undefined
-  }
-  const timedEventMinHours = remoteIsNewer
-    ? getMinHours(remoteV2)
-    : getMinHours(localV2)
-  const matchDescription = remoteIsNewer
-    ? remoteV2.matchDescription
-    : localV2.matchDescription
-  const weekViewEnabled = remoteIsNewer
-    ? remoteV2.weekViewEnabled
-    : localV2.weekViewEnabled
-  const monthScrollEnabled = remoteIsNewer
-    ? remoteV2.monthScrollEnabled
-    : localV2.monthScrollEnabled
-  const monthScrollDensity = remoteIsNewer
-    ? remoteV2.monthScrollDensity
-    : localV2.monthScrollDensity
-
-  return {
-    version: 2,
-    updatedAt: Date.now(),
-    deviceId: settings.deviceId,
-    filters,
-    disabledCalendars,
-    categories: Array.from(categoryMap.values()),
-    timedEventMinHours,
-    matchDescription,
-    weekViewEnabled,
-    monthScrollEnabled,
-    monthScrollDensity,
-  }
-}
-
-/**
  * Apply cloud config to in-memory state.
  * Migrates v1 configs to v2 format before applying.
- * Populates all in-memory services with cloud data.
  */
 export function applyCloudConfigToLocal(config: CloudConfig): void {
-  // Ensure v2 format
   const v2Config = ensureV2(config)
 
-  // Update filters in-memory
   setFilters(v2Config.filters)
-
-  // Update disabled calendars in-memory
   setDisabledCalendars(v2Config.disabledCalendars)
 
-  // Update categories in-memory
   setCategories(
     v2Config.categories.map((cat) => ({
       id: cat.id,
@@ -437,12 +293,10 @@ export function applyCloudConfigToLocal(config: CloudConfig): void {
     }))
   )
 
-  // Update display settings in-memory
-  // Handle migration: prefer timedEventMinHours, fall back to showTimedEvents conversion
+  // Handle migration: prefer timedEventMinHours, fall back to showTimedEvents
   if (v2Config.timedEventMinHours !== undefined) {
     setTimedEventMinHours(v2Config.timedEventMinHours)
   } else if (v2Config.showTimedEvents !== undefined) {
-    // Migrate from legacy: true = 0 (show all), false = 3 (default threshold)
     setTimedEventMinHours(v2Config.showTimedEvents ? 0 : 3)
   }
   if (v2Config.matchDescription !== undefined) {
@@ -458,7 +312,6 @@ export function applyCloudConfigToLocal(config: CloudConfig): void {
     setMonthScrollDensity(v2Config.monthScrollDensity)
   }
 
-  // Update sync settings
   const settings = getSyncSettings()
   saveSyncSettings({
     ...settings,
@@ -472,14 +325,11 @@ export type SyncResult =
   | { status: 'error'; message: string }
 
 /**
- * Perform a full sync with Google Drive.
- * - Reads from Drive
- * - Merges with local if both exist
- * - Writes merged result back to Drive and in-memory state
- *
- * Returns detailed result indicating success, skip reason, or error.
+ * Load settings from cloud and apply to local state.
+ * This is a READ-ONLY operation - it does NOT write back to cloud.
+ * Use this on app startup to restore user's settings.
  */
-export async function performSync(): Promise<SyncResult> {
+export async function loadFromCloud(): Promise<SyncResult> {
   if (!isSyncEnabled()) {
     return { status: 'skipped', reason: 'disabled' }
   }
@@ -488,62 +338,35 @@ export async function performSync(): Promise<SyncResult> {
     return { status: 'skipped', reason: 'already-syncing' }
   }
 
+  if (!navigator.onLine) {
+    return { status: 'skipped', reason: 'offline' }
+  }
+
   isSyncing = true
   lastSyncError = null
 
   try {
-    // Check if we can access Drive
     const canAccess = await checkDriveAccess()
     if (!canAccess) {
-      if (!navigator.onLine) {
-        // Offline - not an error, just skip sync
-        return { status: 'skipped', reason: 'offline' }
-      }
       lastSyncError = 'Cannot access Google Drive'
       return { status: 'error', message: lastSyncError }
     }
 
-    // Read from Drive
     const remoteResult = await readCloudConfig()
     if (!remoteResult.success) {
       lastSyncError = remoteResult.error?.message || 'Failed to read from Drive'
       return { status: 'error', message: lastSyncError }
     }
 
-    const localConfig = buildCloudConfigFromLocal()
-    let configToWrite: CloudConfig
-
     if (remoteResult.data) {
-      // If local is empty (new device), adopt remote settings entirely
-      // This prevents a new device from wiping existing cloud settings
-      if (isEmptyConfig(localConfig)) {
-        configToWrite = {
-          ...remoteResult.data,
-          updatedAt: Date.now(),
-          deviceId: getSyncSettings().deviceId,
-        }
-      } else {
-        // Both have data - merge with last-write-wins
-        configToWrite = mergeConfigs(localConfig, remoteResult.data)
-      }
-    } else {
-      // No remote config - use local as initial upload
-      configToWrite = localConfig
+      // Cloud has data - apply it to local state
+      applyCloudConfigToLocal(remoteResult.data)
     }
-
-    // Write merged config to Drive
-    const writeResult = await writeCloudConfig(configToWrite)
-    if (!writeResult.success) {
-      lastSyncError = writeResult.error?.message || 'Failed to write to Drive'
-      return { status: 'error', message: lastSyncError }
-    }
-
-    // Apply merged config to in-memory state
-    applyCloudConfigToLocal(configToWrite)
+    // If cloud is empty, keep local defaults (will be saved on first user change)
 
     return { status: 'success' }
   } catch (error) {
-    lastSyncError = error instanceof Error ? error.message : 'Sync failed'
+    lastSyncError = error instanceof Error ? error.message : 'Failed to load from cloud'
     return { status: 'error', message: lastSyncError }
   } finally {
     isSyncing = false
@@ -551,31 +374,35 @@ export async function performSync(): Promise<SyncResult> {
 }
 
 /**
+ * @deprecated Use loadFromCloud() for initial load, scheduleSyncToCloud() for saves.
+ * Kept for backward compatibility during transition.
+ */
+export async function performSync(): Promise<SyncResult> {
+  return loadFromCloud()
+}
+
+/**
  * Enable cloud sync.
- * Clears the "explicitly disabled" flag and performs initial sync.
- * Note: Sync is ON by default when user has drive scope.
+ * Clears the "explicitly disabled" flag and loads from cloud.
  */
 export async function enableSync(): Promise<boolean> {
   if (!hasDriveScope()) {
     return false
   }
 
-  // Clear the explicitly disabled flag
   try {
     localStorage.removeItem(SYNC_DISABLED_KEY)
   } catch (error) {
     log.debug('Storage access error enabling sync:', error)
   }
 
-  // Perform initial sync
-  const result = await performSync()
+  const result = await loadFromCloud()
   return result.status === 'success'
 }
 
 /**
  * Disable cloud sync.
  * Sets the "explicitly disabled" flag to opt-out of sync.
- * Keeps in-memory data but stops syncing to Drive.
  */
 export function disableSync(): void {
   try {
@@ -599,14 +426,8 @@ export type DeleteCloudDataResult =
 
 /**
  * Delete all cloud data from Google Drive and reset in-memory state.
- * This removes the config file from appDataFolder.
- * Resets all settings to defaults.
- * Useful for:
- * - Starting completely fresh
- * - Users who want to delete their data from Google
  */
 export async function deleteCloudData(): Promise<DeleteCloudDataResult> {
-  // Check if we're online before attempting delete
   if (!navigator.onLine) {
     const message = 'Cannot delete cloud data while offline'
     lastSyncError = message
@@ -621,10 +442,8 @@ export async function deleteCloudData(): Promise<DeleteCloudDataResult> {
       return { status: 'error', message }
     }
 
-    // Reset in-memory state to defaults
     resetInMemoryState()
 
-    // Reset sync settings but keep device ID
     const settings = getSyncSettings()
     saveSyncSettings({
       ...settings,
@@ -644,13 +463,9 @@ export async function deleteCloudData(): Promise<DeleteCloudDataResult> {
  * Reset all in-memory settings to defaults.
  */
 export function resetInMemoryState(): void {
-  // Clear filters
   setFilters([])
-
-  // Clear disabled calendars
   setDisabledCalendars([])
 
-  // Reset categories to defaults (done by importing fresh)
   const now = Date.now()
   setCategories(
     DEFAULT_CATEGORIES.map((cat) => ({
@@ -660,19 +475,20 @@ export function resetInMemoryState(): void {
     }))
   )
 
-  // Reset display settings
   setTimedEventMinHours(3)
   setMatchDescription(false)
+  setWeekViewEnabled(false)
+  setMonthScrollEnabled(false)
+  setMonthScrollDensity(60)
 }
 
 /**
- * Schedule a debounced sync.
- * Call this after any local data change to sync to Drive.
+ * Schedule a debounced write to cloud.
+ * Call this after any local data change.
  *
  * Uses isWriting/needsAnotherWrite flags to handle rapid changes:
- * - If a write is in progress and new changes come in, we flag for another write
- * - After the current write completes, we check if another write is needed
- * - This prevents race conditions where changes during a write are lost
+ * - If a write is in progress, flag for another write after
+ * - Prevents race conditions where changes during a write are lost
  */
 export function scheduleSyncToCloud(): void {
   if (!isSyncEnabled()) {
@@ -683,7 +499,11 @@ export function scheduleSyncToCloud(): void {
     window.clearTimeout(syncDebounceTimer)
   }
 
-  // If we're currently writing, flag that we need another write after
+  if (!navigator.onLine) {
+    hasPendingChanges = true
+    return
+  }
+
   if (isWriting) {
     needsAnotherWrite = true
     return
@@ -693,7 +513,7 @@ export function scheduleSyncToCloud(): void {
     syncDebounceTimer = null
 
     if (!navigator.onLine) {
-      // Queue for later when online
+      hasPendingChanges = true
       return
     }
 
@@ -703,7 +523,7 @@ export function scheduleSyncToCloud(): void {
 
 /**
  * Perform the actual debounced write to Drive.
- * Handles the isWriting flag and checks for queued writes.
+ * Write-only - does NOT read or merge.
  */
 async function performDebouncedWrite(): Promise<void> {
   if (isWriting) {
@@ -713,6 +533,7 @@ async function performDebouncedWrite(): Promise<void> {
 
   isWriting = true
   needsAnotherWrite = false
+  hasPendingChanges = false
 
   try {
     const localConfig = buildCloudConfigFromLocal()
@@ -732,7 +553,6 @@ async function performDebouncedWrite(): Promise<void> {
   } finally {
     isWriting = false
 
-    // If changes occurred during the write, schedule another write
     if (needsAnotherWrite) {
       needsAnotherWrite = false
       scheduleSyncToCloud()
@@ -741,19 +561,17 @@ async function performDebouncedWrite(): Promise<void> {
 }
 
 /**
- * Handle coming back online - sync queued changes.
+ * Handle coming back online - write any pending changes.
  */
 export function handleOnline(): void {
-  if (isSyncEnabled()) {
-    performSync().catch((error) => {
-      log.error('Sync failed after coming online:', error)
-    })
+  if (isSyncEnabled() && hasPendingChanges) {
+    hasPendingChanges = false
+    scheduleSyncToCloud()
   }
 }
 
 /**
  * Initialize sync manager event listeners.
- * Call this once on app startup.
  * Returns a cleanup function to remove listeners.
  */
 export function initSyncListeners(): () => void {
@@ -765,7 +583,6 @@ export function initSyncListeners(): () => void {
 
   return () => {
     window.removeEventListener('online', handleOnline)
-    // Clear any pending debounce timer
     if (syncDebounceTimer !== null) {
       window.clearTimeout(syncDebounceTimer)
       syncDebounceTimer = null

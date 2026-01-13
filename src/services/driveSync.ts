@@ -120,6 +120,12 @@ function validateV1Config(
     disabledCalendars,
     disabledBuiltInCategories,
     customCategories,
+    // Display settings - pass through if present and valid type
+    ...(typeof config.showTimedEvents === 'boolean' && { showTimedEvents: config.showTimedEvents }),
+    ...(typeof config.matchDescription === 'boolean' && { matchDescription: config.matchDescription }),
+    ...(typeof config.weekViewEnabled === 'boolean' && { weekViewEnabled: config.weekViewEnabled }),
+    ...(typeof config.monthScrollEnabled === 'boolean' && { monthScrollEnabled: config.monthScrollEnabled }),
+    ...(typeof config.monthScrollDensity === 'number' && Number.isFinite(config.monthScrollDensity) && { monthScrollDensity: config.monthScrollDensity }),
   }
 }
 
@@ -148,6 +154,13 @@ function validateV2Config(
     filters,
     disabledCalendars,
     categories,
+    // Display settings - pass through if present and valid type
+    ...(typeof config.showTimedEvents === 'boolean' && { showTimedEvents: config.showTimedEvents }),
+    ...(typeof config.timedEventMinHours === 'number' && Number.isFinite(config.timedEventMinHours) && { timedEventMinHours: config.timedEventMinHours }),
+    ...(typeof config.matchDescription === 'boolean' && { matchDescription: config.matchDescription }),
+    ...(typeof config.weekViewEnabled === 'boolean' && { weekViewEnabled: config.weekViewEnabled }),
+    ...(typeof config.monthScrollEnabled === 'boolean' && { monthScrollEnabled: config.monthScrollEnabled }),
+    ...(typeof config.monthScrollDensity === 'number' && Number.isFinite(config.monthScrollDensity) && { monthScrollDensity: config.monthScrollDensity }),
   }
 }
 

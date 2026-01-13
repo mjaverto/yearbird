@@ -46,8 +46,8 @@ const setup = async (overrides: Partial<FilterPanelProps> = {}) => {
     onRetryCalendars: vi.fn(),
     isOpen: true,
     onClose: vi.fn(),
-    showTimedEvents: false,
-    onSetShowTimedEvents: vi.fn(),
+    timedEventMinHours: 3,
+    onSetTimedEventMinHours: vi.fn(),
     matchDescription: false,
     onSetMatchDescription: vi.fn(),
     ...overrides,
@@ -394,30 +394,25 @@ describe('FilterPanel', () => {
   })
 
   describe('Display Settings', () => {
-    it('renders display settings section with both toggles', async () => {
-      // Use showTimedEvents: true to avoid duplicate text (label + sr-only enabledLabel)
-      await setup({ showTimedEvents: true })
+    it('renders display settings section with both controls', async () => {
+      await setup({ timedEventMinHours: 3 })
 
       expect(screen.getByText('Display Settings')).toBeInTheDocument()
-      expect(screen.getByText('Show timed events')).toBeInTheDocument()
+      expect(screen.getByText('Minimum event duration')).toBeInTheDocument()
       expect(screen.getByText('Match descriptions')).toBeInTheDocument()
     })
 
-    it('calls onSetShowTimedEvents when timed events toggle is clicked', async () => {
-      const onSetShowTimedEvents = vi.fn()
-      // Use showTimedEvents: true so sr-only text is "Hide timed events" (unique)
-      await setup({ showTimedEvents: true, onSetShowTimedEvents })
+    it('calls onSetTimedEventMinHours when duration slider is changed', async () => {
+      const onSetTimedEventMinHours = vi.fn()
+      await setup({ timedEventMinHours: 3, onSetTimedEventMinHours })
 
-      const switches = screen.getAllByRole('switch')
-      const timedEventsSwitch = switches.find(
-        (s) => s.textContent?.includes('timed events')
-      )
+      const slider = screen.getByRole('slider', { name: /minimum event duration/i })
 
       await act(async () => {
-        fireEvent.click(timedEventsSwitch!)
+        fireEvent.change(slider, { target: { value: '5' } })
       })
 
-      expect(onSetShowTimedEvents).toHaveBeenCalledWith(false)
+      expect(onSetTimedEventMinHours).toHaveBeenCalledWith(5)
     })
 
     it('calls onSetMatchDescription when match descriptions toggle is clicked', async () => {
@@ -436,25 +431,23 @@ describe('FilterPanel', () => {
       expect(onSetMatchDescription).toHaveBeenCalledWith(true)
     })
 
-    it('shows correct toggle states based on props', async () => {
-      await setup({ showTimedEvents: true, matchDescription: true })
+    it('shows correct slider value based on props', async () => {
+      await setup({ timedEventMinHours: 4 })
 
-      const switches = screen.getAllByRole('switch')
-      // Display settings switches should be checked (CloudSyncToggle state varies)
-      const checkedCount = switches.filter((s) => s.getAttribute('aria-checked') === 'true').length
-      expect(checkedCount).toBeGreaterThanOrEqual(2)
+      const slider = screen.getByRole('slider', { name: /minimum event duration/i })
+      expect(slider).toHaveValue('4')
     })
 
-    it('shows unchecked states when settings are disabled', async () => {
-      await setup({ showTimedEvents: false, matchDescription: false })
+    it('shows "All" label when timedEventMinHours is 0', async () => {
+      await setup({ timedEventMinHours: 0 })
 
-      const switches = screen.getAllByRole('switch')
-      // Find switches by their sr-only text content
-      const timedEventsSwitch = switches.find((s) => s.textContent?.includes('timed events'))
-      const descriptionSwitch = switches.find((s) => s.textContent?.includes('description'))
+      expect(screen.getByText('All')).toBeInTheDocument()
+    })
 
-      expect(timedEventsSwitch).toHaveAttribute('aria-checked', 'false')
-      expect(descriptionSwitch).toHaveAttribute('aria-checked', 'false')
+    it('shows hours label when timedEventMinHours is greater than 0', async () => {
+      await setup({ timedEventMinHours: 3 })
+
+      expect(screen.getByText('3 hrs')).toBeInTheDocument()
     })
   })
 })

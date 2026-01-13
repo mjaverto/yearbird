@@ -6,24 +6,27 @@
  */
 
 // In-memory storage with defaults
-let showTimedEvents = false
+let timedEventMinHours = 3
 let matchDescription = false
 let weekViewEnabled = false
 let monthScrollEnabled = false
 let monthScrollDensity = 60
 
 /**
- * Gets whether single-day timed events should be shown in the calendar.
+ * Gets the minimum duration (in hours) for timed events to be shown.
+ * Events shorter than this threshold are hidden from the year view.
+ * Default is 3 hours. Set to 0 to show all timed events.
  */
-export function getShowTimedEvents(): boolean {
-  return showTimedEvents
+export function getTimedEventMinHours(): number {
+  return timedEventMinHours
 }
 
 /**
- * Sets whether single-day timed events should be shown in the calendar.
+ * Sets the minimum duration (in hours) for timed events to be shown.
+ * Value is clamped to 0-24 range.
  */
-export function setShowTimedEvents(value: boolean): void {
-  showTimedEvents = value
+export function setTimedEventMinHours(value: number): void {
+  timedEventMinHours = Math.max(0, Math.min(24, value))
 }
 
 /**

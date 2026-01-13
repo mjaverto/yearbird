@@ -74,8 +74,10 @@ export interface CloudConfigV2 {
   categories: CloudCategory[]
 
   /** Display settings */
-  /** Show single-day timed events (default: false) */
+  /** @deprecated Use timedEventMinHours instead. Kept for migration. */
   showTimedEvents?: boolean
+  /** Minimum duration (hours) for timed events to show (default: 3, 0 = show all) */
+  timedEventMinHours?: number
   /** Match event descriptions for categorization (default: false) */
   matchDescription?: boolean
   /** Show week view (Mon-Sun columns) instead of month view (default: false) */

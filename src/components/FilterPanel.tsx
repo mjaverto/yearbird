@@ -31,8 +31,8 @@ interface FilterPanelProps {
   onRetryCalendars: () => void
   isOpen: boolean
   onClose: () => void
-  showTimedEvents: boolean
-  onSetShowTimedEvents: (value: boolean) => void
+  timedEventMinHours: number
+  onSetTimedEventMinHours: (value: number) => void
   matchDescription: boolean
   onSetMatchDescription: (value: boolean) => void
 }
@@ -57,8 +57,8 @@ export function FilterPanel({
   onRetryCalendars,
   isOpen,
   onClose,
-  showTimedEvents,
-  onSetShowTimedEvents,
+  timedEventMinHours,
+  onSetTimedEventMinHours,
   matchDescription,
   onSetMatchDescription,
 }: FilterPanelProps) {
@@ -368,18 +368,28 @@ export function FilterPanel({
               <div className="mt-2 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex-1">
-                    <p className="text-xs font-medium text-zinc-700">Show timed events</p>
+                    <p className="text-xs font-medium text-zinc-700">Minimum event duration</p>
                     <p className="text-xs text-zinc-500">
-                      Include single-day timed events (meetings, appointments).
+                      Hide timed events shorter than this from year view.
                     </p>
                   </div>
-                  <Switch
-                    checked={showTimedEvents}
-                    onChange={onSetShowTimedEvents}
-                    label="timed events"
-                    enabledLabel="Show timed events"
-                    disabledLabel="Hide timed events"
-                  />
+                  {/* Slider max is 8 hours (practical UX limit). Cloud-synced values up to 24 are respected. */}
+                  <div className="flex items-center gap-2 rounded-full border border-zinc-200/70 bg-white/90 px-3 py-1.5 shadow-sm">
+                    <input
+                      type="range"
+                      min={0}
+                      max={8}
+                      step={0.5}
+                      value={timedEventMinHours}
+                      onChange={(event) => onSetTimedEventMinHours(Number(event.target.value))}
+                      className="w-20 cursor-pointer accent-sky-500"
+                      aria-label="Minimum event duration in hours"
+                      aria-valuetext={timedEventMinHours === 0 ? 'All' : `${timedEventMinHours} hrs`}
+                    />
+                    <span className="min-w-[3rem] text-xs font-medium text-zinc-700">
+                      {timedEventMinHours === 0 ? 'All' : `${timedEventMinHours} hrs`}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between gap-3">

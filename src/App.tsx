@@ -21,9 +21,9 @@ import { useCategories } from './hooks/useCategories'
 import { useFilters } from './hooks/useFilters'
 import {
   getMatchDescription,
-  getShowTimedEvents,
+  getTimedEventMinHours,
   setMatchDescription as saveMatchDescription,
-  setShowTimedEvents as saveShowTimedEvents,
+  setTimedEventMinHours as saveTimedEventMinHours,
   getWeekViewEnabled,
   setWeekViewEnabled as saveWeekViewEnabled,
   getMonthScrollEnabled,
@@ -94,7 +94,7 @@ function App() {
   const [isMonthScrollEnabled, setIsMonthScrollEnabled] = useState(() => getMonthScrollEnabled())
   const [monthScrollDensity, setMonthScrollDensity] = useState(() => getMonthScrollDensity())
   const [isWeekViewEnabled, setIsWeekViewEnabled] = useState(() => getWeekViewEnabled())
-  const [showTimedEvents, setShowTimedEvents] = useState(() => getShowTimedEvents())
+  const [timedEventMinHours, setTimedEventMinHours] = useState(() => getTimedEventMinHours())
   const [matchDescription, setMatchDescription] = useState(() => getMatchDescription())
   const {
     calendars,
@@ -180,7 +180,7 @@ function App() {
         setIsMonthScrollEnabled(getMonthScrollEnabled())
         setMonthScrollDensity(getMonthScrollDensity())
         setIsWeekViewEnabled(getWeekViewEnabled())
-        setShowTimedEvents(getShowTimedEvents())
+        setTimedEventMinHours(getTimedEventMinHours())
         setMatchDescription(getMatchDescription())
       }
     }).catch((error) => {
@@ -231,19 +231,32 @@ function App() {
   const visibleEvents = useMemo(() => {
     let filtered = filterEvents(categorizedEvents)
 
-    // Filter single-day timed events unless showTimedEvents is enabled
-    if (!showTimedEvents) {
-      filtered = filtered.filter((event) => !event.isSingleDayTimed)
-    }
+    // Filter timed events shorter than minimum duration threshold
+    filtered = filtered.filter((event) => {
+      if (!event.isSingleDayTimed) return true
+
+      // Calculate duration in hours from start/end times
+      if (event.startTimeMinutes !== undefined && event.endTimeMinutes !== undefined) {
+        // Handle events that might cross midnight (endTime < startTime)
+        const durationMinutes = event.endTimeMinutes < event.startTimeMinutes
+          ? (1440 - event.startTimeMinutes) + event.endTimeMinutes
+          : event.endTimeMinutes - event.startTimeMinutes
+        const durationHours = durationMinutes / 60
+        return durationHours >= timedEventMinHours
+      }
+
+      // If time data is missing, show the event (fail open)
+      return true
+    })
 
     if (resolvedHiddenCategories.length === 0) {
       return filtered
     }
     const hiddenSet = new Set(resolvedHiddenCategories)
     return filtered.filter((event) => !hiddenSet.has(event.category))
-  }, [categorizedEvents, filterEvents, resolvedHiddenCategories, showTimedEvents])
+  }, [categorizedEvents, filterEvents, resolvedHiddenCategories, timedEventMinHours])
 
-  // Timed events for popover (always available, regardless of showTimedEvents setting)
+  // Timed events for popover (always available, regardless of timedEventMinHours threshold)
   const timedEventsByDate = useMemo(() => {
     const filtered = filterEvents(categorizedEvents)
     const hiddenSet = new Set(resolvedHiddenCategories)
@@ -394,9 +407,10 @@ function App() {
     })
   }
 
-  const handleSetShowTimedEvents = (value: boolean) => {
-    setShowTimedEvents(value)
-    saveShowTimedEvents(value)
+  const handleSetTimedEventMinHours = (value: number) => {
+    const clamped = Math.max(0, Math.min(24, value))
+    setTimedEventMinHours(clamped)
+    saveTimedEventMinHours(clamped)
     scheduleSyncToCloud()
   }
 
@@ -552,8 +566,8 @@ function App() {
           onRetryCalendars={refetchCalendars}
           isOpen={showFilters}
           onClose={() => setShowFilters(false)}
-          showTimedEvents={showTimedEvents}
-          onSetShowTimedEvents={handleSetShowTimedEvents}
+          timedEventMinHours={timedEventMinHours}
+          onSetTimedEventMinHours={handleSetTimedEventMinHours}
           matchDescription={matchDescription}
           onSetMatchDescription={handleSetMatchDescription}
         />

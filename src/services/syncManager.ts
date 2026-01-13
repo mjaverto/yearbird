@@ -24,8 +24,8 @@ import { getFilters, setFilters } from './filters'
 import { getDisabledCalendars, setDisabledCalendars } from './calendarVisibility'
 import { getCategories, setCategories } from './categories'
 import {
-  getShowTimedEvents,
-  setShowTimedEvents,
+  getTimedEventMinHours,
+  setTimedEventMinHours,
   getMatchDescription,
   setMatchDescription,
   getWeekViewEnabled,
@@ -228,7 +228,7 @@ export function buildCloudConfigFromLocal(): CloudConfigV2 {
     filters: getFilters(),
     disabledCalendars: getDisabledCalendars(),
     categories: cloudCategories,
-    showTimedEvents: getShowTimedEvents(),
+    timedEventMinHours: getTimedEventMinHours(),
     matchDescription: getMatchDescription(),
     weekViewEnabled: getWeekViewEnabled(),
     monthScrollEnabled: getMonthScrollEnabled(),
@@ -278,6 +278,13 @@ export function migrateV1ToV2(config: CloudConfigV1): CloudConfigV2 {
     })
   }
 
+  // Migrate showTimedEvents boolean to timedEventMinHours:
+  // - true (show all) -> 0 hours
+  // - false (hide all) -> 3 hours (default threshold)
+  // - undefined -> undefined (use default)
+  const timedEventMinHours =
+    config.showTimedEvents === true ? 0 : config.showTimedEvents === false ? 3 : undefined
+
   return {
     version: 2,
     updatedAt: config.updatedAt,
@@ -285,7 +292,7 @@ export function migrateV1ToV2(config: CloudConfigV1): CloudConfigV2 {
     filters: config.filters,
     disabledCalendars: config.disabledCalendars,
     categories,
-    showTimedEvents: config.showTimedEvents,
+    timedEventMinHours,
     matchDescription: config.matchDescription,
     weekViewEnabled: config.weekViewEnabled,
     monthScrollEnabled: config.monthScrollEnabled,
@@ -359,12 +366,23 @@ export function mergeConfigs(
   }
 
   // Display settings - last-write-wins
-  const showTimedEvents = remoteIsNewer
-    ? remote.showTimedEvents
-    : local.showTimedEvents
+  // Handle migration: prefer timedEventMinHours, fall back to showTimedEvents conversion
+  const getMinHours = (config: CloudConfigV2): number | undefined => {
+    if (config.timedEventMinHours !== undefined) {
+      return config.timedEventMinHours
+    }
+    // Migrate from legacy showTimedEvents if present
+    if (config.showTimedEvents !== undefined) {
+      return config.showTimedEvents ? 0 : 3
+    }
+    return undefined
+  }
+  const timedEventMinHours = remoteIsNewer
+    ? getMinHours(remoteV2)
+    : getMinHours(localV2)
   const matchDescription = remoteIsNewer
-    ? remote.matchDescription
-    : local.matchDescription
+    ? remoteV2.matchDescription
+    : localV2.matchDescription
   const weekViewEnabled = remoteIsNewer
     ? remoteV2.weekViewEnabled
     : localV2.weekViewEnabled
@@ -382,7 +400,7 @@ export function mergeConfigs(
     filters,
     disabledCalendars,
     categories: Array.from(categoryMap.values()),
-    showTimedEvents,
+    timedEventMinHours,
     matchDescription,
     weekViewEnabled,
     monthScrollEnabled,
@@ -420,8 +438,12 @@ export function applyCloudConfigToLocal(config: CloudConfig): void {
   )
 
   // Update display settings in-memory
-  if (v2Config.showTimedEvents !== undefined) {
-    setShowTimedEvents(v2Config.showTimedEvents)
+  // Handle migration: prefer timedEventMinHours, fall back to showTimedEvents conversion
+  if (v2Config.timedEventMinHours !== undefined) {
+    setTimedEventMinHours(v2Config.timedEventMinHours)
+  } else if (v2Config.showTimedEvents !== undefined) {
+    // Migrate from legacy: true = 0 (show all), false = 3 (default threshold)
+    setTimedEventMinHours(v2Config.showTimedEvents ? 0 : 3)
   }
   if (v2Config.matchDescription !== undefined) {
     setMatchDescription(v2Config.matchDescription)
@@ -639,7 +661,7 @@ export function resetInMemoryState(): void {
   )
 
   // Reset display settings
-  setShowTimedEvents(false)
+  setTimedEventMinHours(3)
   setMatchDescription(false)
 }
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  getShowTimedEvents,
-  setShowTimedEvents,
+  getTimedEventMinHours,
+  setTimedEventMinHours,
   getMatchDescription,
   setMatchDescription,
   getWeekViewEnabled,
@@ -15,36 +15,47 @@ import {
 describe('displaySettings (in-memory)', () => {
   // Reset to defaults before each test
   beforeEach(() => {
-    setShowTimedEvents(false)
+    setTimedEventMinHours(3)
     setMatchDescription(false)
     setWeekViewEnabled(false)
     setMonthScrollEnabled(false)
     setMonthScrollDensity(60)
   })
 
-  describe('getShowTimedEvents', () => {
-    it('returns false by default', () => {
-      expect(getShowTimedEvents()).toBe(false)
+  describe('getTimedEventMinHours', () => {
+    it('returns 3 by default', () => {
+      expect(getTimedEventMinHours()).toBe(3)
     })
 
-    it('returns true after being set to true', () => {
-      setShowTimedEvents(true)
-      expect(getShowTimedEvents()).toBe(true)
+    it('returns 0 when set to show all timed events', () => {
+      setTimedEventMinHours(0)
+      expect(getTimedEventMinHours()).toBe(0)
     })
 
-    it('returns false after being set back to false', () => {
-      setShowTimedEvents(true)
-      expect(getShowTimedEvents()).toBe(true)
-      setShowTimedEvents(false)
-      expect(getShowTimedEvents()).toBe(false)
+    it('returns the set value', () => {
+      setTimedEventMinHours(4)
+      expect(getTimedEventMinHours()).toBe(4)
+    })
+
+    it('clamps values to 0-24 range', () => {
+      setTimedEventMinHours(-5)
+      expect(getTimedEventMinHours()).toBe(0)
+
+      setTimedEventMinHours(30)
+      expect(getTimedEventMinHours()).toBe(24)
+    })
+
+    it('handles fractional values', () => {
+      setTimedEventMinHours(1.5)
+      expect(getTimedEventMinHours()).toBe(1.5)
     })
   })
 
-  describe('setShowTimedEvents', () => {
+  describe('setTimedEventMinHours', () => {
     it('updates the in-memory state', () => {
-      expect(getShowTimedEvents()).toBe(false)
-      setShowTimedEvents(true)
-      expect(getShowTimedEvents()).toBe(true)
+      expect(getTimedEventMinHours()).toBe(3)
+      setTimedEventMinHours(5)
+      expect(getTimedEventMinHours()).toBe(5)
     })
   })
 

@@ -54,8 +54,8 @@ vi.mock('./categories', () => ({
 
 // Mock display settings service
 vi.mock('./displaySettings', () => ({
-  getShowTimedEvents: vi.fn(() => false),
-  setShowTimedEvents: vi.fn(),
+  getTimedEventMinHours: vi.fn(() => 3),
+  setTimedEventMinHours: vi.fn(),
   getMatchDescription: vi.fn(() => false),
   setMatchDescription: vi.fn(),
   getWeekViewEnabled: vi.fn(() => false),
@@ -346,10 +346,28 @@ describe('syncManager', () => {
       expect(setCategories).toHaveBeenCalled()
     })
 
-    it('applies showTimedEvents via setter', async () => {
-      const { setShowTimedEvents } = await import('./displaySettings')
+    it('applies timedEventMinHours via setter', async () => {
+      const { setTimedEventMinHours } = await import('./displaySettings')
 
-      const config: CloudConfig = {
+      const config: CloudConfigV2 = {
+        version: 2,
+        updatedAt: Date.now(),
+        deviceId: 'test-device',
+        filters: [],
+        disabledCalendars: [],
+        categories: [],
+        timedEventMinHours: 4,
+      }
+
+      applyCloudConfigToLocal(config)
+
+      expect(setTimedEventMinHours).toHaveBeenCalledWith(4)
+    })
+
+    it('migrates legacy showTimedEvents true to timedEventMinHours 0', async () => {
+      const { setTimedEventMinHours } = await import('./displaySettings')
+
+      const config: CloudConfigV1 = {
         version: 1,
         updatedAt: Date.now(),
         deviceId: 'test-device',
@@ -362,13 +380,14 @@ describe('syncManager', () => {
 
       applyCloudConfigToLocal(config)
 
-      expect(setShowTimedEvents).toHaveBeenCalledWith(true)
+      // showTimedEvents: true means show all -> timedEventMinHours: 0
+      expect(setTimedEventMinHours).toHaveBeenCalledWith(0)
     })
 
-    it('applies matchDescription via setter', async () => {
-      const { setMatchDescription } = await import('./displaySettings')
+    it('migrates legacy showTimedEvents false to timedEventMinHours 3', async () => {
+      const { setTimedEventMinHours } = await import('./displaySettings')
 
-      const config: CloudConfig = {
+      const config: CloudConfigV1 = {
         version: 1,
         updatedAt: Date.now(),
         deviceId: 'test-device',
@@ -376,6 +395,25 @@ describe('syncManager', () => {
         disabledCalendars: [],
         disabledBuiltInCategories: [],
         customCategories: [],
+        showTimedEvents: false,
+      }
+
+      applyCloudConfigToLocal(config)
+
+      // showTimedEvents: false means use default threshold -> timedEventMinHours: 3
+      expect(setTimedEventMinHours).toHaveBeenCalledWith(3)
+    })
+
+    it('applies matchDescription via setter', async () => {
+      const { setMatchDescription } = await import('./displaySettings')
+
+      const config: CloudConfigV2 = {
+        version: 2,
+        updatedAt: Date.now(),
+        deviceId: 'test-device',
+        filters: [],
+        disabledCalendars: [],
+        categories: [],
         matchDescription: true,
       }
 
@@ -385,46 +423,42 @@ describe('syncManager', () => {
     })
 
     it('does not call display settings setters when undefined in config', async () => {
-      const { setShowTimedEvents, setMatchDescription } = await import('./displaySettings')
+      const { setTimedEventMinHours, setMatchDescription } = await import('./displaySettings')
 
-      vi.mocked(setShowTimedEvents).mockClear()
+      vi.mocked(setTimedEventMinHours).mockClear()
       vi.mocked(setMatchDescription).mockClear()
 
-      const config: CloudConfig = {
-        version: 1,
+      const config: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now(),
         deviceId: 'test-device',
         filters: [],
         disabledCalendars: [],
-        disabledBuiltInCategories: [],
-        customCategories: [],
-        // showTimedEvents and matchDescription are undefined
+        categories: [],
+        // timedEventMinHours and matchDescription are undefined
       }
 
       applyCloudConfigToLocal(config)
 
-      expect(setShowTimedEvents).not.toHaveBeenCalled()
+      expect(setTimedEventMinHours).not.toHaveBeenCalled()
       expect(setMatchDescription).not.toHaveBeenCalled()
     })
 
-    it('applies false values via setters', async () => {
-      const { setShowTimedEvents, setMatchDescription } = await import('./displaySettings')
+    it('applies matchDescription false via setter', async () => {
+      const { setMatchDescription } = await import('./displaySettings')
 
-      const config: CloudConfig = {
-        version: 1,
+      const config: CloudConfigV2 = {
+        version: 2,
         updatedAt: Date.now(),
         deviceId: 'test-device',
         filters: [],
         disabledCalendars: [],
-        disabledBuiltInCategories: [],
-        customCategories: [],
-        showTimedEvents: false,
+        categories: [],
         matchDescription: false,
       }
 
       applyCloudConfigToLocal(config)
 
-      expect(setShowTimedEvents).toHaveBeenCalledWith(false)
       expect(setMatchDescription).toHaveBeenCalledWith(false)
     })
   })
@@ -499,8 +533,8 @@ describe('syncManager', () => {
     })
 
     it('includes display settings in built config', async () => {
-      const { getShowTimedEvents, getMatchDescription } = await import('./displaySettings')
-      vi.mocked(getShowTimedEvents).mockReturnValue(true)
+      const { getTimedEventMinHours, getMatchDescription } = await import('./displaySettings')
+      vi.mocked(getTimedEventMinHours).mockReturnValue(4)
       vi.mocked(getMatchDescription).mockReturnValue(true)
 
       saveSyncSettings({
@@ -511,13 +545,13 @@ describe('syncManager', () => {
 
       const config = buildCloudConfigFromLocal()
 
-      expect(config.showTimedEvents).toBe(true)
+      expect(config.timedEventMinHours).toBe(4)
       expect(config.matchDescription).toBe(true)
     })
 
-    it('includes false display settings values', async () => {
-      const { getShowTimedEvents, getMatchDescription } = await import('./displaySettings')
-      vi.mocked(getShowTimedEvents).mockReturnValue(false)
+    it('includes default display settings values', async () => {
+      const { getTimedEventMinHours, getMatchDescription } = await import('./displaySettings')
+      vi.mocked(getTimedEventMinHours).mockReturnValue(3)
       vi.mocked(getMatchDescription).mockReturnValue(false)
 
       saveSyncSettings({
@@ -528,7 +562,7 @@ describe('syncManager', () => {
 
       const config = buildCloudConfigFromLocal()
 
-      expect(config.showTimedEvents).toBe(false)
+      expect(config.timedEventMinHours).toBe(3)
       expect(config.matchDescription).toBe(false)
     })
 
@@ -1384,56 +1418,56 @@ describe('syncManager', () => {
     }
 
     it('uses remote display settings when remote is newer', () => {
-      const local: CloudConfig = {
+      const local: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 1000,
-        showTimedEvents: false,
+        timedEventMinHours: 3,
         matchDescription: false,
       }
 
-      const remote: CloudConfig = {
+      const remote: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 2000,
-        showTimedEvents: true,
+        timedEventMinHours: 0,
         matchDescription: true,
       }
 
       const merged = mergeConfigs(local, remote)
 
-      expect(merged.showTimedEvents).toBe(true)
+      expect(merged.timedEventMinHours).toBe(0)
       expect(merged.matchDescription).toBe(true)
     })
 
     it('uses local display settings when local is newer', () => {
-      const local: CloudConfig = {
+      const local: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 2000,
-        showTimedEvents: true,
+        timedEventMinHours: 5,
         matchDescription: true,
       }
 
-      const remote: CloudConfig = {
+      const remote: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 1000,
-        showTimedEvents: false,
+        timedEventMinHours: 3,
         matchDescription: false,
       }
 
       const merged = mergeConfigs(local, remote)
 
-      expect(merged.showTimedEvents).toBe(true)
+      expect(merged.timedEventMinHours).toBe(5)
       expect(merged.matchDescription).toBe(true)
     })
 
     it('handles undefined display settings in remote', () => {
-      const local: CloudConfig = {
+      const local: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 1000,
-        showTimedEvents: true,
+        timedEventMinHours: 4,
         matchDescription: true,
       }
 
-      const remote: CloudConfig = {
+      const remote: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 2000,
         // No display settings - simulates old config without these fields
@@ -1442,28 +1476,28 @@ describe('syncManager', () => {
       const merged = mergeConfigs(local, remote)
 
       // Remote is newer but has undefined, so merged gets undefined
-      expect(merged.showTimedEvents).toBeUndefined()
+      expect(merged.timedEventMinHours).toBeUndefined()
       expect(merged.matchDescription).toBeUndefined()
     })
 
     it('handles undefined display settings in local', () => {
-      const local: CloudConfig = {
+      const local: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 2000,
         // No display settings
       }
 
-      const remote: CloudConfig = {
+      const remote: CloudConfigV2 = {
         ...baseConfig,
         updatedAt: 1000,
-        showTimedEvents: true,
+        timedEventMinHours: 4,
         matchDescription: true,
       }
 
       const merged = mergeConfigs(local, remote)
 
       // Local is newer but has undefined, so merged gets undefined
-      expect(merged.showTimedEvents).toBeUndefined()
+      expect(merged.timedEventMinHours).toBeUndefined()
       expect(merged.matchDescription).toBeUndefined()
     })
   })

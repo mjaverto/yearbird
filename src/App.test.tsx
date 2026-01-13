@@ -32,8 +32,8 @@ vi.mock('./hooks/useFilters', () => ({
 
 // Mock displaySettings - use actual module with spyable functions
 vi.mock('./services/displaySettings', () => ({
-  getShowTimedEvents: vi.fn(() => false),
-  setShowTimedEvents: vi.fn(),
+  getTimedEventMinHours: vi.fn(() => 3),
+  setTimedEventMinHours: vi.fn(),
   getMatchDescription: vi.fn(() => false),
   setMatchDescription: vi.fn(),
   getWeekViewEnabled: vi.fn(() => false),

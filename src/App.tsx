@@ -31,7 +31,7 @@ import {
   getMonthScrollDensity,
   setMonthScrollDensity as saveMonthScrollDensity,
 } from './services/displaySettings'
-import { scheduleSyncToCloud } from './services/syncManager'
+import { scheduleSyncToCloud, performSync, isSyncEnabled } from './services/syncManager'
 import type { EventCategory, YearbirdEvent } from './types/calendar'
 import { categorizeEvent, getAllCategories, getCategoryMatchList } from './utils/categorize'
 import { resolveCalendarId, type CalendarMeta } from './utils/calendarUtils'
@@ -157,6 +157,40 @@ function App() {
     [hiddenCategories, knownCategorySet]
   )
   const [showFilters, setShowFilters] = useState(false)
+  const hasInitialSynced = useRef(false)
+
+  // Auto-sync from cloud on authentication
+  // This loads user's categories, calendar visibility, and display settings from Google Drive
+  useEffect(() => {
+    if (!isAuthenticated || !isReady || hasInitialSynced.current) {
+      return
+    }
+
+    // Only sync if cloud sync is enabled (user has drive scope and hasn't disabled it)
+    if (!isSyncEnabled()) {
+      hasInitialSynced.current = true
+      return
+    }
+
+    hasInitialSynced.current = true
+
+    performSync().then((result) => {
+      if (result.status === 'success') {
+        // Update React state from the now-populated in-memory state
+        setIsMonthScrollEnabled(getMonthScrollEnabled())
+        setMonthScrollDensity(getMonthScrollDensity())
+        setIsWeekViewEnabled(getWeekViewEnabled())
+        setShowTimedEvents(getShowTimedEvents())
+        setMatchDescription(getMatchDescription())
+        log.info('Cloud sync completed, settings restored')
+      } else if (result.status === 'error') {
+        log.warn('Cloud sync failed:', result.message)
+      }
+    }).catch((error) => {
+      log.error('Cloud sync error:', error)
+    })
+  }, [isAuthenticated, isReady])
+
   const widthToggleLabel = isMonthScrollEnabled ? 'Fit full year' : 'Focus months'
   const widthToggleTitle = isMonthScrollEnabled
     ? 'Fit full year'

@@ -880,8 +880,8 @@ export function LandingPage({
               <img
                 src={heroGif}
                 alt="Animated demo showing Yearbird's day-click interaction: clicking a day reveals the event schedule, then clicking an event shows rich details like location and description"
-                width={1280}
-                height={720}
+                width={1440}
+                height={810}
                 loading="eager"
                 decoding="async"
                 className="w-full"

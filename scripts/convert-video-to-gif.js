@@ -70,7 +70,7 @@ async function main() {
       '-i',
       videoPath,
       '-vf',
-      'fps=15,scale=1280:-1:flags=lanczos,palettegen=stats_mode=diff:max_colors=256',
+      'fps=15,scale=1440:-1:flags=lanczos,palettegen=stats_mode=diff:max_colors=256',
       '-y',
       '/tmp/palette.png',
     ], { stdio: 'inherit' })
@@ -84,7 +84,7 @@ async function main() {
       '-i',
       '/tmp/palette.png',
       '-lavfi',
-      'fps=15,scale=1280:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=floyd_steinberg:diff_mode=rectangle',
+      'fps=15,scale=1440:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=floyd_steinberg:diff_mode=rectangle',
       '-y',
       outputPath,
     ], { stdio: 'inherit' })

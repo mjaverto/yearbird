@@ -182,9 +182,6 @@ function App() {
         setIsWeekViewEnabled(getWeekViewEnabled())
         setShowTimedEvents(getShowTimedEvents())
         setMatchDescription(getMatchDescription())
-        log.info('Cloud sync completed, settings restored')
-      } else if (result.status === 'error') {
-        log.warn('Cloud sync failed:', result.message)
       }
     }).catch((error) => {
       log.error('Cloud sync error:', error)

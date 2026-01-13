@@ -351,7 +351,7 @@ export const EventTooltip = forwardRef<HTMLDivElement, EventTooltipProps>(functi
               onClick={() => onHideEvent(event.title)}
               aria-label={`Hide events like ${event.title}`}
             >
-              Hide
+              Hide this event
             </button>
           ) : null}
         </div>
